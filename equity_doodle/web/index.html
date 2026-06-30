@@ -31,7 +31,7 @@
 <body>
 <div class="wrap">
   <h1>Equity Doodle ✏️📈</h1>
-  <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation.</p>
+  <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation. <a href="/about" style="color:#cf222e; text-decoration:none;">What is this? →</a></p>
 
   <div class="card">
     <canvas id="board"></canvas>
@@ -45,7 +45,8 @@
     </div>
     <div class="legend">
       <span><span class="swatch" style="background:#222"></span>your doodle</span>
-      <span><span class="swatch" style="background:#cf222e"></span>model median</span>
+      <span><span class="swatch" style="background:#cf222e"></span>model continuation (sample)</span>
+      <span><span class="swatch" style="background:rgba(207,34,46,.45)"></span>median (dashed)</span>
       <span><span class="swatch" style="background:rgba(207,34,46,.18)"></span>uncertainty band</span>
     </div>
   </div>
@@ -67,9 +68,11 @@ const clearBtn = document.getElementById("clear");
 const horizon = document.getElementById("horizon");
 const hval = document.getElementById("hval");
 
+const DRAW_LIMIT = 0.66;  // draw only in the left part; the model fills the right
 let drawing = false;
 let points = [];          // {x, y} in canvas pixels, as the user draws
 let result = null;        // last forecast response
+let view = null;          // pixel transform captured at request time
 
 function fitCanvas() {
   const ratio = window.devicePixelRatio || 1;
@@ -92,6 +95,8 @@ function end()    { drawing = false; completeBtn.disabled = points.length < 5; }
 
 function addPoint(e) {
   const p = pos(e);
+  const limit = canvas.clientWidth * DRAW_LIMIT;
+  if (p.x > limit) p.x = limit;            // keep room on the right for the forecast
   // enforce strictly increasing x so it reads as a left-to-right time series
   if (!points.length || p.x > points[points.length - 1].x + 0.5) points.push(p);
   redraw();
@@ -112,61 +117,113 @@ function gridlines(W, H) {
   for (let i = 1; i < 6; i++) { const y = H * i / 6; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
 }
 
+function drawGuide(W, H) {
+  const gx = W * DRAW_LIMIT;
+  ctx.save();
+  ctx.strokeStyle = "#c9c9c9"; ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(gx, 8); ctx.lineTo(gx, H - 8); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#aaa"; ctx.font = "12px system-ui";
+  ctx.textAlign = "end"; ctx.fillText("draw up to here ", gx, 18);
+  ctx.textAlign = "start"; ctx.fillText(" model fills →", gx, 18);
+  ctx.restore();
+}
+
+// Natural pixel coords (the doodle's own scale). Forecast prices invert the
+// exact transform used when sampling, so everything shares one coordinate space.
+function scene() {
+  const q = result.quantiles, fx = result.forecast_x;
+  const horizon = fx.length - 1;
+  const basePrice = (view.H - view.y0) + 10;
+  const Yp = p => (view.H + 10) - p * basePrice / 100;   // price -> natural y
+  const right = canvas.clientWidth - 16;                 // always fill out to the right edge
+  const Xn = i => view.x1 + (right - view.x1) * (i / horizon);  // forecast bar -> natural x
+  const sampleLine = result.sample || q["0.50"];
+  return { q, horizon, Yp, Xn, sampleLine, median: q["0.50"] };
+}
+
+// One uniform transform applied to the WHOLE picture. Preserves the doodle's
+// shape (aspect ratio is never distorted); only shrinks-to-fit when the forecast
+// would overflow the canvas, otherwise it's the identity (pixel-perfect doodle).
+function computeTransform() {
+  const W = canvas.clientWidth, H = canvas.clientHeight, pad = 16;
+  const identity = (x, y) => [x, y];
+  if (!result || !view) return identity;
+
+  const s = scene();
+  const xs = [], ys = [];
+  for (const p of points) { xs.push(p.x); ys.push(p.y); }
+  for (let i = 0; i <= s.horizon; i++) {
+    xs.push(s.Xn(i));
+    ys.push(s.Yp(s.sampleLine[i]));
+    if (s.median) ys.push(s.Yp(s.median[i]));
+  }
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const inBounds = minX >= pad && maxX <= W - pad && minY >= pad && maxY <= H - pad;
+  if (inBounds) return identity;                          // fits as-drawn: don't touch it
+
+  // Overflow: stretch the content box to fill the area (width AND height) so the
+  // forecast always reaches the right edge. Bands are excluded from the box, so the
+  // vertical adjustment stays mild -- it fits only the doodle + sample + median.
+  const sx = (W - 2 * pad) / (maxX - minX || 1);
+  const sy = (H - 2 * pad) / (maxY - minY || 1);
+  return (x, y) => [pad + (x - minX) * sx, pad + (y - minY) * sy];
+}
+
+function drawDoodle(T) {
+  if (points.length < 2) return;
+  ctx.strokeStyle = "#222"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+  ctx.beginPath();
+  points.forEach((p, i) => { const [x, y] = T(p.x, p.y); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+}
+
 function redraw() {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   ctx.clearRect(0, 0, W, H);
   gridlines(W, H);
+  drawGuide(W, H);
 
-  if (result) { drawResult(W, H); return; }
-
-  // freehand drawing
-  if (points.length > 1) {
-    ctx.strokeStyle = "#222"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
-    ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
-    for (const p of points) ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-  } else {
+  if (!points.length && !result) {
     ctx.fillStyle = "#bbb"; ctx.font = "16px system-ui";
     ctx.fillText("✏️  draw a price line here, left to right…", 24, H / 2);
+    return;
   }
+  const T = computeTransform();
+  drawDoodle(T);                       // your line — shape always preserved
+  if (result) drawForecast(T);
 }
 
-function drawResult(W, H) {
-  const pad = 30;
-  const ctxLen = result.context.y.length;
-  const fx = result.forecast_x;
-  const xMax = fx[fx.length - 1];
-  // collect all y values to scale vertically
-  let all = [...result.context.y];
-  for (const q in result.quantiles) all = all.concat(result.quantiles[q]);
-  const yMin = Math.min(...all), yMax = Math.max(...all);
-  const sx = x => pad + (W - 2 * pad) * (x / xMax);
-  const sy = y => H - pad - (H - 2 * pad) * ((y - yMin) / (yMax - yMin || 1));
+function drawForecast(T) {
+  const s = scene();
+  const H = s.horizon, q = s.q;
+  const P = (i, price) => { const [x, y] = T(s.Xn(i), s.Yp(price)); return [x, y]; };
 
-  // uncertainty bands (outer 10-90, inner 25-75)
-  const band = (lo, hi) => {
+  // subtle uncertainty bands
+  const band = (lo, hi, a) => {
+    if (!q[lo] || !q[hi]) return;
     ctx.beginPath();
-    fx.forEach((x, i) => { const X = sx(x), Y = sy(result.quantiles[hi][i]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
-    for (let i = fx.length - 1; i >= 0; i--) ctx.lineTo(sx(fx[i]), sy(result.quantiles[lo][i]));
-    ctx.closePath(); ctx.fillStyle = "rgba(207,34,46,.12)"; ctx.fill();
+    for (let i = 0; i <= H; i++) { const [x, y] = P(i, q[hi][i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    for (let i = H; i >= 0; i--) { const [x, y] = P(i, q[lo][i]); ctx.lineTo(x, y); }
+    ctx.closePath(); ctx.fillStyle = `rgba(207,34,46,${a})`; ctx.fill();
   };
-  if (result.quantiles["0.10"]) band("0.10", "0.90");
-  if (result.quantiles["0.25"]) band("0.25", "0.75");
+  band("0.10", "0.90", 0.08);
+  band("0.25", "0.75", 0.10);
 
-  // context (your doodle)
-  ctx.strokeStyle = "#222"; ctx.lineWidth = 2.5; ctx.beginPath();
-  result.context.y.forEach((y, i) => { const X = sx(i), Y = sy(y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+  // faint median (dashed) for reference
+  if (q["0.50"]) {
+    ctx.strokeStyle = "rgba(207,34,46,.35)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    for (let i = 0; i <= H; i++) { const [x, y] = P(i, q["0.50"][i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // main "added line": a jagged sample path joining the doodle at its last point
+  ctx.strokeStyle = "#cf222e"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (let i = 0; i <= H; i++) { const [x, y] = P(i, s.sampleLine[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
   ctx.stroke();
-
-  // median forecast
-  ctx.strokeStyle = "#cf222e"; ctx.lineWidth = 2.5; ctx.beginPath();
-  fx.forEach((x, i) => { const X = sx(x), Y = sy(result.quantiles["0.50"][i]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
-  ctx.stroke();
-
-  // divider where the doodle ends and the model begins
-  ctx.strokeStyle = "#bbb"; ctx.setLineDash([5, 4]); ctx.beginPath();
-  ctx.moveTo(sx(ctxLen - 1), pad); ctx.lineTo(sx(ctxLen - 1), H - pad); ctx.stroke();
-  ctx.setLineDash([]);
 }
 
 completeBtn.onclick = async () => {
@@ -184,6 +241,8 @@ completeBtn.onclick = async () => {
     const y = a.y + (b.y - a.y) * f;
     prices.push((H - y) + 10);   // flip + keep strictly positive
   }
+  // capture the transform so the forecast maps back to the doodle's pixel scale
+  view = { H, y0: points[0].y, x0, x1 };
   statusEl.textContent = "thinking…"; completeBtn.disabled = true;
   try {
     const res = await fetch("/api/forecast", {

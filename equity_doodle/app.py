@@ -37,6 +37,11 @@ def index():
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/about")
+def about():
+    return FileResponse(WEB_DIR / "about.html")
+
+
 @app.post("/api/forecast")
 def api_forecast(req: DrawRequest):
     if len(req.prices) < 2:
@@ -55,8 +60,10 @@ def api_forecast(req: DrawRequest):
         f"{q:.2f}": [anchor] + [float(v) for v in arr]
         for q, arr in out["quantiles"].items()
     }
+    sample = [anchor] + [float(v) for v in out["sample"]]
     return {
         "context": {"x": list(range(n)), "y": [float(v) for v in ctx]},
         "forecast_x": list(range(n - 1, n - 1 + horizon + 1)),
         "quantiles": quantiles,
+        "sample": sample,
     }

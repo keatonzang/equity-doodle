@@ -15,25 +15,37 @@ from . import config, features
 
 
 def predict_returns(
-    model, context_returns, horizon: int = config.HORIZON, num_samples: int = 500
-) -> dict:
+    model,
+    context_returns,
+    horizon: int = config.HORIZON,
+    num_samples: int = 500,
+    with_sample: bool = False,
+):
     """Forecast future log-returns from a raw (un-normalized) return context.
 
     The context is z-scored, fed to the model, and the predicted quantiles are
     mapped back to the context's own volatility scale. Shared by the web app and
     the backtest so both behave identically.
 
-    Returns ``{quantile: np.ndarray of length ``horizon``}`` in raw return space.
+    Returns ``{quantile: np.ndarray}`` in raw return space. If ``with_sample`` is
+    set, returns ``(quantiles, sample)`` where ``sample`` is one representative
+    draw from the predictive distribution -- jagged, like a real price path.
     """
     from darts import TimeSeries
 
     z, mean, std = features.standardize_returns(context_returns)
     ctx = TimeSeries.from_values(z.astype("float32"))
     pred = model.predict(n=horizon, series=ctx, num_samples=num_samples)
-    return {
+    quantiles = {
         q: features.destandardize_returns(pred.quantile(q).values().flatten(), mean, std)
         for q in config.QUANTILES
     }
+    if not with_sample:
+        return quantiles
+    # one Monte-Carlo sample path: shape (time, component, samples) -> first sample
+    z_sample = pred.all_values()[:, 0, 0]
+    sample = features.destandardize_returns(z_sample, mean, std)
+    return quantiles, sample
 
 
 def complete_doodle(drawn_prices, model, horizon: int = config.HORIZON) -> dict:
@@ -61,7 +73,8 @@ def complete_doodle(drawn_prices, model, horizon: int = config.HORIZON) -> dict:
     prices = features.normalize_drawn_path(prices)
     rets = features.to_log_returns(prices)
 
-    q_rets = predict_returns(model, rets, horizon)
+    q_rets, sample_rets = predict_returns(model, rets, horizon, with_sample=True)
     last_price = float(prices[-1])
     quantiles = {q: features.from_log_returns(r, last_price) for q, r in q_rets.items()}
-    return {"context": prices, "quantiles": quantiles}
+    sample = features.from_log_returns(sample_rets, last_price)
+    return {"context": prices, "quantiles": quantiles, "sample": sample}

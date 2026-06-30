@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>About — Equity Doodle ✏️📈</title>
+<style>
+  :root { --ink:#222; --accent:#cf222e; --muted:#666; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; padding: 24px; color: var(--ink); background:#fafafa; line-height:1.65; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  h2 { margin: 28px 0 8px; font-size: 1.15rem; }
+  p.sub { margin: 0 0 8px; color: var(--muted); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .card { background:#fff; border:1px solid #e5e5e5; border-radius:12px;
+          padding:22px 26px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  .nav { margin-bottom:16px; }
+  code { background:#f0f0f0; padding:1px 5px; border-radius:4px; font-size:.9em; }
+  .key { border-left:3px solid var(--accent); padding:4px 0 4px 16px; margin:14px 0;
+         background:linear-gradient(90deg, rgba(207,34,46,.04), transparent); }
+  ul { padding-left:20px; }
+  li { margin:6px 0; }
+  footer { margin-top:22px; font-size:.8rem; color:var(--muted); line-height:1.55; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav"><a href="/">← back to the drawing board</a></div>
+
+  <h1>About Equity Doodle ✏️📈</h1>
+  <p class="sub">Draw the start of a chart — let the model doodle the rest.</p>
+
+  <div class="card">
+    <p>
+      Equity Doodle is an <strong>educational case study</strong> that turns stock-chart
+      "completion" into a time-series forecasting problem. The segment you draw becomes a
+      model's <strong>input context window</strong>, and the continuation it sketches is the
+      <strong>forecast horizon</strong>. One <em>global</em> model is trained across many
+      liquid equities and many time resolutions, so it learns the general grammar of price
+      paths rather than memorizing a single ticker.
+    </p>
+
+    <h2>How it works</h2>
+    <ul>
+      <li>Your drawing is reduced to a fixed number of bars and converted to
+        <strong>log-returns</strong> — so price scale and how many points you drew don't matter.</li>
+      <li>The returns are <strong>z-scored</strong> (normalized to their own volatility) and fed to a
+        global <strong>gradient-boosted model</strong> with quantile regression.</li>
+      <li>The model predicts a distribution of future returns, which is rescaled by the
+        volatility you drew and integrated back into a price path.</li>
+      <li>You see a <strong>jagged sample continuation</strong> (one plausible future), a faint
+        <strong>median</strong> (the expected path), and a shaded <strong>uncertainty band</strong>.</li>
+    </ul>
+    <p>
+      Because everything happens in standardized return space on an integer index, the system is
+      <strong>time-scale invariant</strong>: draw at any resolution — intraday, daily, weekly — and any
+      price scale, and it still works.
+    </p>
+
+    <h2>What the median and the bands are really telling you</h2>
+    <p>
+      A reliable chart pattern is, by definition, one whose <em>shape</em> dictates what comes
+      next — the same setup producing the same outcome, again and again. If such
+      <strong>time-scale-invariant technical patterns genuinely existed</strong>, this model would be
+      ideally placed to expose them: trained across many equities and resolutions, it will have
+      seen every common shape thousands of times. You would then notice two tell-tale signatures:
+    </p>
+    <div class="key">
+      <p style="margin:.3em 0;"><strong>1. The median would consistently bend the "right" way.</strong>
+        Draw a given pattern and the model's expected continuation would reliably point in the
+        direction that pattern is supposed to imply.</p>
+      <p style="margin:.3em 0;"><strong>2. The confidence band would be tight.</strong>
+        A repeatable outcome means low uncertainty, so the fan around the median would be narrow.</p>
+    </div>
+    <p>
+      What you actually observe is the opposite. No matter how you wiggle the input, the median
+      collapses toward a gentle drift, and the uncertainty band <strong>fans out wide</strong>. That is
+      not a defect in the model — it's a direct, visual demonstration of how little of future price
+      movement is determined by the shape of the recent past. The wide fan <em>is</em> the result:
+      it's the efficient-market intuition, drawn. The honest backtests reflect the same story —
+      directional accuracy only modestly above a coin flip, and error barely better than a random walk.
+    </p>
+
+    <h2>Why this matters as a study</h2>
+    <p>
+      The point was never to make money. It's to build the full pipeline end-to-end — data,
+      a scale-invariant global model, honest out-of-sample evaluation, and an interactive UI — and
+      to let the model's own uncertainty <em>show you</em> why "the chart tells you where it's going"
+      is mostly a story we tell ourselves.
+    </p>
+
+    <footer>
+      <strong>Educational case study — not financial advice.</strong> Forecasts come from a
+      statistical model fit on historical data and are very likely wrong. Do not make financial
+      decisions based on this. Provided as-is, without warranty or liability.
+      <br />Source &amp; license: <a href="https://github.com/keatonzang/equity-doodle">github.com/keatonzang/equity-doodle</a>
+    </footer>
+  </div>
+</div>
+</body>
+</html>
