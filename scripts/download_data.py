@@ -1,5 +1,10 @@
 """Download and cache daily prices for the configured ticker universe."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from equity_doodle import data
 
 

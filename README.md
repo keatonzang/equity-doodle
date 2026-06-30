@@ -37,14 +37,35 @@ it learns the general "grammar" of price paths rather than memorizing one ticker
 4. **Reconstruct** — predicted returns are integrated back into a price path,
    starting from the last point you drew.
 
+## Time-scale invariance
+
+Equity Doodle is built to be **time-scale invariant** — you can train on any
+resolution and draw at any resolution (intraday, daily, weekly) at any price
+scale. Three mechanisms make that work:
+
+1. **Integer index, return space** — the model forecasts log-returns on a plain
+   integer index, so the calendar never enters.
+2. **Per-window z-scoring** — the drawn window is normalized to zero-mean /
+   unit-variance before the model sees it, then predictions are rescaled by the
+   window's own volatility. This removes the volatility-scale dependence (daily
+   vs weekly magnitudes) and means a jagged doodle yields a jagged completion.
+3. **Multi-scale training** — each daily series is aggregated into block-sum
+   returns at scales k = 1, 2, 3, 5, 10, 21 bars, so one global model learns the
+   shape of price paths across resolutions.
+
+This makes it *scale-robust*; perfect invariance is impossible because the
+statistical structure of returns genuinely differs by scale — a real finance
+fact, not a bug.
+
 ## Roadmap
 
 - [x] Project scaffold, license, disclaimer
-- [ ] Data pipeline (`equity_doodle/data.py`) — download + cache daily OHLCV
-- [ ] Feature transforms (`equity_doodle/features.py`) — price ⇄ log-returns
-- [ ] Global quantile model (`equity_doodle/model.py`) — train + backtest
-- [ ] Forecast API (`equity_doodle/forecast.py`) — drawn path → completion
-- [ ] Web app — a canvas where you draw a chart and the AI finishes it
+- [x] Data pipeline (`equity_doodle/data.py`) — download + cache daily OHLCV
+- [x] Feature transforms (`equity_doodle/features.py`) — price ⇄ log-returns
+- [x] Global quantile model (`equity_doodle/model.py`) — multi-scale, scale-invariant
+- [x] Honest out-of-sample backtest (`scripts/backtest.py`)
+- [x] Forecast API (`equity_doodle/forecast.py`) — drawn path → completion
+- [x] Web app — a canvas where you draw a chart and the AI finishes it
 
 ## Setup
 
@@ -53,15 +74,28 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Usage (work in progress)
+## Usage
 
 ```bash
-# 1. Download daily data for the default ticker universe
+# 1. Download daily data for the default ticker universe (free, no API key)
 python scripts/download_data.py
 
-# 2. Train the global model
+# 2. Train the global, scale-invariant model
 python scripts/train.py
+
+# 3. Backtest honestly (out-of-sample, daily + weekly)
+python scripts/backtest.py
+
+# 4. Launch the drawing web app, then open http://localhost:8000
+uvicorn equity_doodle.app:app --reload
 ```
+
+### Sample completion
+
+The backtest saves a fan-chart comparing the model's completion to what actually
+happened on a held-out window:
+
+![sample forecast](docs/sample_forecast.png)
 
 ## ⚖️ Disclaimer
 

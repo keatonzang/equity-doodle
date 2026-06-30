@@ -14,20 +14,27 @@ from . import config, features
 
 
 def _build_return_series(prices: pd.DataFrame):
-    """Turn a wide price frame into a list of Darts TimeSeries of log-returns."""
+    """Turn a wide price frame into a list of standardized, multi-scale
+    log-return TimeSeries (a plain integer index; the calendar carries no
+    signal we rely on).
+
+    For every ticker we emit one series per scale in ``config.SCALES``, each
+    z-scored to unit variance. Pooling these teaches one global model the shape
+    of price paths across time resolutions.
+    """
     from darts import TimeSeries
 
+    min_len = config.CONTEXT_LENGTH + config.HORIZON + 5
     series = []
     for ticker in prices.columns:
         col = prices[ticker].dropna()
-        if len(col) < config.CONTEXT_LENGTH + config.HORIZON + 5:
-            continue  # not enough history to be useful
         rets = features.to_log_returns(col.to_numpy())
-        idx = col.index[1:]  # returns align to the later of each pair
-        ts = TimeSeries.from_times_and_values(
-            pd.DatetimeIndex(idx), rets.astype("float32")
-        )
-        series.append(ts)
+        for k in config.SCALES:
+            agg = features.aggregate_returns(rets, k)
+            if len(agg) < min_len:
+                continue
+            z, _, _ = features.standardize_returns(agg)
+            series.append(TimeSeries.from_values(z.astype("float32")))
     if not series:
         raise ValueError("no ticker had enough history to build a series")
     return series

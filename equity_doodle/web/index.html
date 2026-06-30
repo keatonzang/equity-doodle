@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Equity Doodle ✏️📈</title>
+<style>
+  :root { --ink:#222; --accent:#cf222e; --grid:#eee; --muted:#666; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; padding: 24px; color: var(--ink); background:#fafafa; }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  p.sub { margin: 0 0 16px; color: var(--muted); }
+  .card { background:#fff; border:1px solid #e5e5e5; border-radius:12px;
+          padding:16px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  canvas { width:100%; height:420px; border:1px solid #e5e5e5; border-radius:8px;
+           touch-action:none; cursor: crosshair; background:#fff; }
+  .row { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+  button { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid #ccc;
+           background:#fff; cursor:pointer; }
+  button.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+  button:disabled { opacity:.5; cursor:default; }
+  label { font-size:.9rem; color:var(--muted); }
+  .legend { display:flex; gap:16px; font-size:.85rem; color:var(--muted); margin-top:10px; }
+  .swatch { display:inline-block; width:12px; height:12px; border-radius:2px;
+            margin-right:6px; vertical-align:middle; }
+  footer { margin-top:18px; font-size:.78rem; color:var(--muted); line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Equity Doodle ✏️📈</h1>
+  <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation.</p>
+
+  <div class="card">
+    <canvas id="board"></canvas>
+    <div class="row">
+      <button id="complete" class="primary" disabled>Complete my chart</button>
+      <button id="clear">Clear</button>
+      <label>Horizon: <span id="hval">20</span> bars
+        <input id="horizon" type="range" min="5" max="60" value="20" />
+      </label>
+      <span id="status" style="color:var(--muted); font-size:.85rem;"></span>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#222"></span>your doodle</span>
+      <span><span class="swatch" style="background:#cf222e"></span>model median</span>
+      <span><span class="swatch" style="background:rgba(207,34,46,.18)"></span>uncertainty band</span>
+    </div>
+  </div>
+
+  <footer>
+    <strong>Educational case study — not financial advice.</strong> Forecasts come from a
+    statistical model fit on historical data and are very likely wrong. Do not make financial
+    decisions based on this. Provided as-is, without warranty or liability. Time-scale invariant:
+    draw at any resolution (intraday, daily, weekly) and any price scale.
+  </footer>
+</div>
+
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const completeBtn = document.getElementById("complete");
+const clearBtn = document.getElementById("clear");
+const horizon = document.getElementById("horizon");
+const hval = document.getElementById("hval");
+
+let drawing = false;
+let points = [];          // {x, y} in canvas pixels, as the user draws
+let result = null;        // last forecast response
+
+function fitCanvas() {
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * ratio;
+  canvas.height = canvas.clientHeight * ratio;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  redraw();
+}
+window.addEventListener("resize", fitCanvas);
+
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return { x: t.clientX - r.left, y: t.clientY - r.top };
+}
+
+function start(e) { drawing = true; points = []; result = null; addPoint(e); e.preventDefault(); }
+function move(e)  { if (drawing) { addPoint(e); e.preventDefault(); } }
+function end()    { drawing = false; completeBtn.disabled = points.length < 5; }
+
+function addPoint(e) {
+  const p = pos(e);
+  // enforce strictly increasing x so it reads as a left-to-right time series
+  if (!points.length || p.x > points[points.length - 1].x + 0.5) points.push(p);
+  redraw();
+}
+
+canvas.addEventListener("mousedown", start);
+canvas.addEventListener("mousemove", move);
+window.addEventListener("mouseup", end);
+canvas.addEventListener("touchstart", start);
+canvas.addEventListener("touchmove", move);
+canvas.addEventListener("touchend", end);
+
+clearBtn.onclick = () => { points = []; result = null; completeBtn.disabled = true; statusEl.textContent = ""; redraw(); };
+horizon.oninput = () => { hval.textContent = horizon.value; };
+
+function gridlines(W, H) {
+  ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
+  for (let i = 1; i < 6; i++) { const y = H * i / 6; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+}
+
+function redraw() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  ctx.clearRect(0, 0, W, H);
+  gridlines(W, H);
+
+  if (result) { drawResult(W, H); return; }
+
+  // freehand drawing
+  if (points.length > 1) {
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+    for (const p of points) ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = "#bbb"; ctx.font = "16px system-ui";
+    ctx.fillText("✏️  draw a price line here, left to right…", 24, H / 2);
+  }
+}
+
+function drawResult(W, H) {
+  const pad = 30;
+  const ctxLen = result.context.y.length;
+  const fx = result.forecast_x;
+  const xMax = fx[fx.length - 1];
+  // collect all y values to scale vertically
+  let all = [...result.context.y];
+  for (const q in result.quantiles) all = all.concat(result.quantiles[q]);
+  const yMin = Math.min(...all), yMax = Math.max(...all);
+  const sx = x => pad + (W - 2 * pad) * (x / xMax);
+  const sy = y => H - pad - (H - 2 * pad) * ((y - yMin) / (yMax - yMin || 1));
+
+  // uncertainty bands (outer 10-90, inner 25-75)
+  const band = (lo, hi) => {
+    ctx.beginPath();
+    fx.forEach((x, i) => { const X = sx(x), Y = sy(result.quantiles[hi][i]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+    for (let i = fx.length - 1; i >= 0; i--) ctx.lineTo(sx(fx[i]), sy(result.quantiles[lo][i]));
+    ctx.closePath(); ctx.fillStyle = "rgba(207,34,46,.12)"; ctx.fill();
+  };
+  if (result.quantiles["0.10"]) band("0.10", "0.90");
+  if (result.quantiles["0.25"]) band("0.25", "0.75");
+
+  // context (your doodle)
+  ctx.strokeStyle = "#222"; ctx.lineWidth = 2.5; ctx.beginPath();
+  result.context.y.forEach((y, i) => { const X = sx(i), Y = sy(y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+  ctx.stroke();
+
+  // median forecast
+  ctx.strokeStyle = "#cf222e"; ctx.lineWidth = 2.5; ctx.beginPath();
+  fx.forEach((x, i) => { const X = sx(x), Y = sy(result.quantiles["0.50"][i]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+  ctx.stroke();
+
+  // divider where the doodle ends and the model begins
+  ctx.strokeStyle = "#bbb"; ctx.setLineDash([5, 4]); ctx.beginPath();
+  ctx.moveTo(sx(ctxLen - 1), pad); ctx.lineTo(sx(ctxLen - 1), H - pad); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+completeBtn.onclick = async () => {
+  if (points.length < 5) return;
+  // sample the freehand polyline into evenly spaced prices; flip y (canvas y grows down)
+  const N = 80, H = canvas.clientHeight;
+  const x0 = points[0].x, x1 = points[points.length - 1].x;
+  const prices = [];
+  for (let i = 0; i < N; i++) {
+    const xt = x0 + (x1 - x0) * i / (N - 1);
+    // find segment containing xt
+    let j = 0; while (j < points.length - 2 && points[j + 1].x < xt) j++;
+    const a = points[j], b = points[j + 1];
+    const f = b.x === a.x ? 0 : (xt - a.x) / (b.x - a.x);
+    const y = a.y + (b.y - a.y) * f;
+    prices.push((H - y) + 10);   // flip + keep strictly positive
+  }
+  statusEl.textContent = "thinking…"; completeBtn.disabled = true;
+  try {
+    const res = await fetch("/api/forecast", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prices, horizon: parseInt(horizon.value, 10) }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    result = await res.json();
+    statusEl.textContent = "done — clear to draw again";
+    redraw();
+  } catch (err) {
+    statusEl.textContent = "error: " + err.message;
+    completeBtn.disabled = false;
+  }
+};
+
+fitCanvas();
+</script>
+</body>
+</html>

@@ -1,5 +1,10 @@
 """Train the global quantile model on cached prices."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from equity_doodle import data, model
 
 
