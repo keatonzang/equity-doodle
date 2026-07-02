@@ -27,23 +27,31 @@ STRIDE = 10          # evaluate every Nth origin in the test region
 
 def evaluate(m, prices, split_idx, scale, scale_name):
     """Directional accuracy + MAE of cumulative H-step return, out-of-sample,
-    at a given time ``scale`` (k bars aggregated per step)."""
+    at a given time ``scale`` (k bars aggregated per step).
+
+    All origins are gathered first and forecast in one batched model call, so a
+    Torch deep learner pays a single trainer pass rather than one per origin.
+    """
     H, C = config.HORIZON, config.CONTEXT_LENGTH
-    hits = total = 0
-    model_err, naive_err = [], []
+    contexts, actuals = [], []
     for ticker in prices.columns:
         col = prices[ticker].dropna()
         rets = features.aggregate_returns(features.to_log_returns(col.to_numpy()), scale)
         start = int(len(rets) * SPLIT_FRAC)
         for o in range(max(start, C), len(rets) - H, STRIDE):
-            ctx = rets[o - C : o]
-            pred = forecast.predict_returns(m, ctx, H, num_samples=150)
-            pred_cum = float(pred[0.5].sum())                 # median path
-            actual_cum = float(rets[o : o + H].sum())
-            hits += np.sign(pred_cum) == np.sign(actual_cum)
-            total += 1
-            model_err.append(abs(pred_cum - actual_cum))
-            naive_err.append(abs(actual_cum))                 # RW predicts 0
+            contexts.append(rets[o - C : o])
+            actuals.append(float(rets[o : o + H].sum()))
+
+    preds = forecast.predict_returns_batch(m, contexts, H, num_samples=150)
+
+    hits = 0
+    model_err, naive_err = [], []
+    for pred, actual_cum in zip(preds, actuals):
+        pred_cum = float(pred[0.5].sum())                     # median path
+        hits += np.sign(pred_cum) == np.sign(actual_cum)
+        model_err.append(abs(pred_cum - actual_cum))
+        naive_err.append(abs(actual_cum))                     # RW predicts 0
+    total = len(actuals)
     print(f"\n=== Out-of-sample @ {scale_name} (k={scale}) ===")
     print(f"  forecasts evaluated : {total}")
     print(f"  directional accuracy: {hits / total:.3f}  (random-walk ~0.50)")
@@ -85,12 +93,15 @@ def sample_chart(m, prices, ticker="AAPL", out="docs/sample_forecast.png"):
 
 
 def main():
+    # Optional CLI override of the backend, e.g. `python scripts/backtest.py lightgbm`.
+    model_type = sys.argv[1] if len(sys.argv) > 1 else config.MODEL_TYPE
     prices = data.load_cached()
     split_idx = int(len(prices) * SPLIT_FRAC)
     train_prices = prices.iloc[:split_idx]
+    print(f"Backend: {model_type}")
     print(f"Training multi-scale model on {prices.shape[1]} tickers x scales "
           f"{config.SCALES} (train {int(SPLIT_FRAC*100)}% by date)...")
-    m = model.train(train_prices)
+    m = model.train(train_prices, model_type=model_type)
     evaluate(m, prices, split_idx, scale=1, scale_name="daily")
     evaluate(m, prices, split_idx, scale=5, scale_name="weekly")
     sample_chart(m, prices)

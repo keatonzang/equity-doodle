@@ -2,6 +2,10 @@
 darts>=0.30
 lightgbm>=4.6
 
+# Deep learner (TiDE) — Torch backend, used when MODEL_TYPE = "tide"
+torch>=2.2
+pytorch-lightning>=2.2
+
 # Data
 yfinance>=0.2.61
 pandas>=2.2

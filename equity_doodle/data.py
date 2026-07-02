@@ -29,6 +29,9 @@ def download_prices(
     # With multiple tickers yfinance returns a column MultiIndex; grab "Close".
     close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]]
     close = close.sort_index().dropna(how="all")
+    # Drop tickers that failed to download / have no data (all-NaN columns), so a
+    # few bad symbols in a large universe don't pollute the cache.
+    close = close.dropna(axis=1, how="all")
     return close
 
 

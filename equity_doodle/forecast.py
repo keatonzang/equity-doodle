@@ -14,6 +14,23 @@ import numpy as np
 from . import config, features
 
 
+def _calibrate(quantiles: dict, sample=None):
+    """Widen the fan around its median by ``config.CALIBRATION_LAMBDA``.
+
+    Quantile models here are overconfident, so we scale each quantile's (and the
+    representative sample's) deviation from the median by a conformal factor fit
+    offline -- see :mod:`scripts.calibrate`. ``lambda == 1.0`` is a no-op.
+    """
+    lam = config.CALIBRATION_LAMBDA
+    if lam == 1.0:
+        return quantiles if sample is None else (quantiles, sample)
+    median = quantiles[0.5]
+    widened = {q: median + lam * (arr - median) for q, arr in quantiles.items()}
+    if sample is None:
+        return widened
+    return widened, median + lam * (np.asarray(sample) - median)
+
+
 def predict_returns(
     model,
     context_returns,
@@ -41,11 +58,48 @@ def predict_returns(
         for q in config.QUANTILES
     }
     if not with_sample:
-        return quantiles
+        return _calibrate(quantiles)
     # one Monte-Carlo sample path: shape (time, component, samples) -> first sample
     z_sample = pred.all_values()[:, 0, 0]
     sample = features.destandardize_returns(z_sample, mean, std)
-    return quantiles, sample
+    return _calibrate(quantiles, sample)
+
+
+def predict_returns_batch(
+    model,
+    contexts,
+    horizon: int = config.HORIZON,
+    num_samples: int = 200,
+):
+    """Vectorized :func:`predict_returns` over many contexts in one model call.
+
+    Each context is z-scored independently, all are forecast in a single batched
+    ``model.predict`` (one Torch trainer pass instead of one per origin), then
+    each prediction is mapped back to its own context's volatility. Returns a
+    list of ``{quantile: np.ndarray}`` dicts aligned with ``contexts``.
+    """
+    from darts import TimeSeries
+
+    stats, series = [], []
+    for ctx in contexts:
+        z, mean, std = features.standardize_returns(ctx)
+        stats.append((mean, std))
+        series.append(TimeSeries.from_values(z.astype("float32")))
+
+    preds = model.predict(n=horizon, series=series, num_samples=num_samples)
+    if not isinstance(preds, list):       # single-series guard
+        preds = [preds]
+
+    out = []
+    for pred, (mean, std) in zip(preds, stats):
+        quantiles = {
+            q: features.destandardize_returns(
+                pred.quantile(q).values().flatten(), mean, std
+            )
+            for q in config.QUANTILES
+        }
+        out.append(_calibrate(quantiles))
+    return out
 
 
 def complete_doodle(drawn_prices, model, horizon: int = config.HORIZON) -> dict:
