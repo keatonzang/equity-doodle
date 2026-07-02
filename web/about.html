@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="How Equity Doodle works: a global N-HiTS time-series model, honest backtests, calibrated uncertainty — running entirely in your browser." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✏️</text></svg>" />
 <title>About — Equity Doodle ✏️📈</title>
 <style>
   :root { --ink:#222; --accent:#cf222e; --muted:#666; }
@@ -28,7 +30,7 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="nav"><a href="/">← back to the drawing board</a></div>
+  <div class="nav"><a href="./">← back to the drawing board</a></div>
 
   <h1>About Equity Doodle ✏️📈</h1>
   <p class="sub">Draw the start of a chart — let the model doodle the rest.</p>
@@ -38,9 +40,9 @@
       Equity Doodle is an <strong>educational case study</strong> that turns stock-chart
       "completion" into a time-series forecasting problem. The segment you draw becomes a
       model's <strong>input context window</strong>, and the continuation it sketches is the
-      <strong>forecast horizon</strong>. One <em>global</em> model is trained across many
-      liquid equities and many time resolutions, so it learns the general grammar of price
-      paths rather than memorizing a single ticker.
+      <strong>forecast horizon</strong>. One <em>global</em> model is trained across ~230
+      assets — equities, ETFs, crypto, FX, commodities, rates — and many time resolutions,
+      so it learns the general grammar of price paths rather than memorizing a single ticker.
     </p>
 
     <h2>How it works</h2>
@@ -48,11 +50,14 @@
       <li>Your drawing is reduced to a fixed number of bars and converted to
         <strong>log-returns</strong> — so price scale and how many points you drew don't matter.</li>
       <li>The returns are <strong>z-scored</strong> (normalized to their own volatility) and fed to a
-        global <strong>gradient-boosted model</strong> with quantile regression.</li>
-      <li>The model predicts a distribution of future returns, which is rescaled by the
-        volatility you drew and integrated back into a price path.</li>
-      <li>You see a <strong>jagged sample continuation</strong> (one plausible future), a faint
-        <strong>median</strong> (the expected path), and a shaded <strong>uncertainty band</strong>.</li>
+        global <strong>N-HiTS neural network</strong> with quantile regression — the winner of an
+        honest bake-off against gradient boosting and TiDE on out-of-sample fan quality.</li>
+      <li>The raw fan is <strong>conformally calibrated</strong>: quantile models are overconfident
+        out of the box (the nominal 10–90% band covered only ~60% of realized moves), so the fan
+        is widened by a factor fit on held-out data until the 80% band actually covers ~80%.</li>
+      <li>The predicted return distribution is rescaled by the volatility you drew and integrated
+        back into a price path. You see a <strong>jagged sample continuation</strong> (one plausible
+        future), a faint <strong>median</strong>, and the shaded <strong>uncertainty band</strong>.</li>
     </ul>
     <p>
       Because everything happens in standardized return space on an integer index, the system is
@@ -60,12 +65,20 @@
       price scale, and it still works.
     </p>
 
+    <h2>It runs entirely in your browser</h2>
+    <p>
+      The trained network is exported to <strong>ONNX</strong> (~1&nbsp;MB) and executed locally with
+      <a href="https://onnxruntime.ai/">ONNX Runtime Web</a>. There is no server and no API:
+      nothing you draw ever leaves the page, forecasts cost nothing to serve, and the whole
+      app is a static site.
+    </p>
+
     <h2>What the median and the bands are really telling you</h2>
     <p>
       A reliable chart pattern is, by definition, one whose <em>shape</em> dictates what comes
       next — the same setup producing the same outcome, again and again. If such
       <strong>time-scale-invariant technical patterns genuinely existed</strong>, this model would be
-      ideally placed to expose them: trained across many equities and resolutions, it will have
+      ideally placed to expose them: trained across many assets and resolutions, it will have
       seen every common shape thousands of times. You would then notice two tell-tale signatures:
     </p>
     <div class="key">
@@ -87,9 +100,9 @@
     <h2>Why this matters as a study</h2>
     <p>
       The point was never to make money. It's to build the full pipeline end-to-end — data,
-      a scale-invariant global model, honest out-of-sample evaluation, and an interactive UI — and
-      to let the model's own uncertainty <em>show you</em> why "the chart tells you where it's going"
-      is mostly a story we tell ourselves.
+      a scale-invariant global model, an honest bake-off, calibrated uncertainty, and an
+      interactive UI — and to let the model's own uncertainty <em>show you</em> why "the chart
+      tells you where it's going" is mostly a story we tell ourselves.
     </p>
 
     <footer>

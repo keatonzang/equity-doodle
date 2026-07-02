@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Draw the start of a stock chart and a neural time-series model doodles a probabilistic continuation — entirely in your browser." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✏️</text></svg>" />
 <title>Equity Doodle ✏️📈</title>
 <style>
   :root { --ink:#222; --accent:#cf222e; --grid:#eee; --muted:#666; }
@@ -31,7 +33,7 @@
 <body>
 <div class="wrap">
   <h1>Equity Doodle ✏️📈</h1>
-  <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation. <a href="/about" style="color:#cf222e; text-decoration:none;">What is this? →</a></p>
+  <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation. <a href="about.html" style="color:#cf222e; text-decoration:none;">What is this? →</a></p>
 
   <div class="card">
     <canvas id="board"></canvas>
@@ -56,9 +58,13 @@
     statistical model fit on historical data and are very likely wrong. Do not make financial
     decisions based on this. Provided as-is, without warranty or liability. Time-scale invariant:
     draw at any resolution (intraday, daily, weekly) and any price scale.
+    The model runs <strong>entirely in your browser</strong> via ONNX Runtime — nothing you draw
+    leaves the page.
   </footer>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.js"></script>
+<script src="forecast.js"></script>
 <script>
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
@@ -73,6 +79,17 @@ let drawing = false;
 let points = [];          // {x, y} in canvas pixels, as the user draws
 let result = null;        // last forecast response
 let view = null;          // pixel transform captured at request time
+let modelReady = false;
+
+// Warm the model on page load (~1 MB, cached thereafter).
+statusEl.textContent = "loading model (1 MB)…";
+loadModel().then(() => {
+  modelReady = true;
+  statusEl.textContent = "model ready — draw!";
+  completeBtn.disabled = points.length < 5;
+}).catch(err => {
+  statusEl.textContent = "model failed to load: " + err.message;
+});
 
 function fitCanvas() {
   const ratio = window.devicePixelRatio || 1;
@@ -91,7 +108,7 @@ function pos(e) {
 
 function start(e) { drawing = true; points = []; result = null; addPoint(e); e.preventDefault(); }
 function move(e)  { if (drawing) { addPoint(e); e.preventDefault(); } }
-function end()    { drawing = false; completeBtn.disabled = points.length < 5; }
+function end()    { drawing = false; completeBtn.disabled = !modelReady || points.length < 5; }
 
 function addPoint(e) {
   const p = pos(e);
@@ -109,7 +126,7 @@ canvas.addEventListener("touchstart", start);
 canvas.addEventListener("touchmove", move);
 canvas.addEventListener("touchend", end);
 
-clearBtn.onclick = () => { points = []; result = null; completeBtn.disabled = true; statusEl.textContent = ""; redraw(); };
+clearBtn.onclick = () => { points = []; result = null; completeBtn.disabled = true; statusEl.textContent = modelReady ? "model ready — draw!" : statusEl.textContent; redraw(); };
 horizon.oninput = () => { hval.textContent = horizon.value; };
 
 function gridlines(W, H) {
@@ -227,7 +244,7 @@ function drawForecast(T) {
 }
 
 completeBtn.onclick = async () => {
-  if (points.length < 5) return;
+  if (points.length < 5 || !modelReady) return;
   // sample the freehand polyline into evenly spaced prices; flip y (canvas y grows down)
   const N = 80, H = canvas.clientHeight;
   const x0 = points[0].x, x1 = points[points.length - 1].x;
@@ -245,12 +262,7 @@ completeBtn.onclick = async () => {
   view = { H, y0: points[0].y, x0, x1 };
   statusEl.textContent = "thinking…"; completeBtn.disabled = true;
   try {
-    const res = await fetch("/api/forecast", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prices, horizon: parseInt(horizon.value, 10) }),
-    });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-    result = await res.json();
+    result = await completeDoodle(prices, parseInt(horizon.value, 10));
     statusEl.textContent = "done — clear to draw again";
     redraw();
   } catch (err) {

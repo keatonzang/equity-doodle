@@ -28,3 +28,6 @@ lightning_logs/
 .DS_Store
 .idea/
 .vscode/
+
+# Scratch / experiment logs
+scratch_*
