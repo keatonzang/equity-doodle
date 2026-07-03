@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="Point the model at a real ticker and watch the live price crawl through its uncertainty band — a calibration audit you can see." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Live Audit — Equity Doodle 📡" />
+<meta property="og:title" content="Live Audit — Equity Doodle" />
 <meta property="og:description" content="Point the model at a real ticker and watch the live price crawl through its uncertainty band — a calibration audit you can see." />
 <meta property="og:url" content="https://equity-doodle.vercel.app/live" />
 <meta property="og:image" content="https://equity-doodle.vercel.app/og.png" />
 <meta name="twitter:card" content="summary_large_image" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>" />
-<title>Live Audit 📡 — Equity Doodle</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><polyline points=%2212,78 36,44 56,60 88,22%22 fill=%22none%22 stroke=%22%23cf222e%22 stroke-width=%2214%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>" />
+<title>Live Audit — Equity Doodle</title>
 <style>
   :root { --ink:#222; --accent:#cf222e; --truth:#0969da; --grid:#eee; --muted:#666; }
   * { box-sizing: border-box; }
@@ -49,11 +49,11 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Live Audit 📡</h1>
+  <h1>Live Audit</h1>
   <p class="sub">Point the model at a real ticker: it forecasts from the last 60 bars, then the
     live price crawls through the band. A well-calibrated 10–90% band should contain
     roughly 8 in 10 bars — watch it happen (or not).
-    <a href="./">← drawing board</a> · <a href="game.html">🎯 beat the model</a> ·
+    <a href="./">← drawing board</a> · <a href="game.html">beat the model</a> ·
     <a href="about.html">what is this?</a></p>
 
   <div class="card">
@@ -67,6 +67,8 @@
       </select>
       <button id="go" class="primary" disabled>Forecast</button>
       <button id="reanchor" disabled title="restart the forecast from the latest bar">Re-anchor now</button>
+      <label style="font-size:.85rem; color:var(--muted); cursor:pointer;">
+        <input type="checkbox" id="candles" /> candlesticks</label>
       <span id="status" style="color:var(--muted); font-size:.85rem;"></span>
     </div>
     <canvas id="board"></canvas>
@@ -99,6 +101,7 @@ const goBtn = document.getElementById("go");
 const reanchorBtn = document.getElementById("reanchor");
 const symbolEl = document.getElementById("symbol");
 const intervalEl = document.getElementById("interval");
+const candlesEl = document.getElementById("candles");
 const auditEl = document.getElementById("audit");
 
 const PAD = 16;
@@ -158,8 +161,10 @@ async function anchor() {
     live = {
       symbol: data.symbol, name: data.name, currency: data.currency,
       interval, context, fanQ,
+      ctxBars,                       // full OHLC bars, for candlestick rendering
       anchorT: ctxBars[ctxBars.length - 1].t,
       actual: [],                    // closes observed after the anchor bar
+      actualBars: [],                // same bars with OHLC
       lastBarT: data.bars[data.bars.length - 1].t,
     };
     reanchorBtn.disabled = false;
@@ -176,6 +181,7 @@ async function anchor() {
 
 goBtn.onclick = anchor;
 reanchorBtn.onclick = anchor;
+candlesEl.onchange = () => redraw();
 
 /* --------------------------------- polling ------------------------------- */
 
@@ -194,7 +200,8 @@ async function poll() {
     for (let i = data.bars.length - 1; i >= 0; i--) {
       if (data.bars[i].t <= live.anchorT) { idx = i; break; }
     }
-    live.actual = data.bars.slice(idx + 1, idx + 1 + HOR).map(b => b.c);
+    live.actualBars = data.bars.slice(idx + 1, idx + 1 + HOR);
+    live.actual = live.actualBars.map(b => b.c);
     live.lastBarT = data.bars.length ? data.bars[data.bars.length - 1].t : live.lastBarT;
     if (live.actual.length >= HOR && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     updateAudit();
@@ -249,17 +256,23 @@ window.addEventListener("resize", fitCanvas);
 function mapping() {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   const nBars = CTX_N + HOR;
-  const X = i => PAD + (W - 2 * PAD) * (i / nBars);
-  // y-domain: context + median + observed bars. The fan's outer quantiles are
-  // deliberately excluded — a wide band must not squash the lines that matter
-  // (same fix as game.html); the band just clips off-canvas.
+  const X = i => W * (i / nBars);   // flush to both edges: the forecast must reach the right border
+  // y-domain: context + median + observed bars (highs/lows too, so candle
+  // wicks fit). The fan's outer quantiles are deliberately excluded — a wide
+  // band must not squash the lines that matter (same fix as game.html); the
+  // band just clips off-canvas.
   const vals = live.context.slice();
   vals.push(...live.fanQ["0.50"], ...live.actual);
+  for (const b of live.ctxBars.concat(live.actualBars)) {
+    if (b.h != null) vals.push(b.h);
+    if (b.l != null) vals.push(b.l);
+  }
   let lo = Math.min(...vals), hi = Math.max(...vals);
   const margin = (hi - lo || Math.abs(hi) || 1) * 0.10;
   lo -= margin; hi += margin;
   const Y = p => H - PAD - (H - 2 * PAD) * ((p - lo) / (hi - lo));
-  return { W, H, X, Y };
+  const Yinv = y => lo + (hi - lo) * ((H - PAD - y) / (H - 2 * PAD));
+  return { W, H, X, Y, Yinv };
 }
 
 function polyline(vals, i0, m, stroke, width, dash) {
@@ -273,6 +286,81 @@ function polyline(vals, i0, m, stroke, width, dash) {
   ctx.stroke(); ctx.setLineDash([]);
 }
 
+const fmtPrice = v =>
+  v >= 1000 ? v.toLocaleString(undefined, { maximumFractionDigits: 0 })
+  : v >= 10 ? v.toFixed(2)
+  : v >= 0.1 ? v.toFixed(3)
+  : v.toPrecision(3);
+
+// OHLC candles for bars that have them; bars missing open/high/low fall back
+// to a close tick so sparse upstream data doesn't leave holes.
+function drawCandles(bars, i0, m) {
+  const w = Math.max(2, (m.W / (CTX_N + HOR)) * 0.6);
+  for (let k = 0; k < bars.length; k++) {
+    const b = bars[k];
+    const x = m.X(i0 + k);
+    if (b.o == null || b.h == null || b.l == null) {
+      ctx.fillStyle = "#666";
+      ctx.fillRect(x - w / 2, m.Y(b.c) - 0.5, w, 1);
+      continue;
+    }
+    const up = b.c >= b.o;
+    ctx.strokeStyle = ctx.fillStyle = up ? "#1a7f37" : "#cf222e";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, m.Y(b.h)); ctx.lineTo(x, m.Y(b.l)); ctx.stroke();
+    const yTop = m.Y(Math.max(b.o, b.c)), yBot = m.Y(Math.min(b.o, b.c));
+    ctx.fillRect(x - w / 2, yTop, w, Math.max(1, yBot - yTop));
+  }
+}
+
+// Axis annotations: real timestamps on x (history uses each bar's own time;
+// the forecast region extrapolates clock time for intraday bars, and falls
+// back to bar counts for daily bars, where calendar arithmetic would lie
+// across weekends), real prices on y, and the model's predicted price levels
+// at the end of the horizon.
+function drawAxes(m) {
+  ctx.save();
+  ctx.font = "11px system-ui";
+  const intraday = live.interval !== "1d";
+
+  ctx.fillStyle = "#999"; ctx.textAlign = "start"; ctx.textBaseline = "bottom";
+  for (let i = 1; i < 6; i++) {
+    const y = m.H * i / 6;
+    ctx.fillText(fmtPrice(m.Yinv(y)), 4, y - 2);
+  }
+
+  ctx.textBaseline = "alphabetic";
+  const fmtT = t => intraday
+    ? new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : new Date(t * 1000).toLocaleDateString([], { month: "numeric", day: "numeric" });
+  const ticks = [];
+  for (const f of [0.17, 0.5, 0.83]) {
+    const k = Math.round(CTX_N * f);
+    ticks.push([k, fmtT(live.ctxBars[k].t)]);
+  }
+  ticks.push([CTX_N, fmtT(live.anchorT)]);
+  for (const k of [10, 20]) {
+    if (k > HOR) break;
+    ticks.push([CTX_N + k, intraday ? fmtT(live.anchorT + k * BAR_SEC[live.interval]) : "+" + k + " bars"]);
+  }
+  for (const [i, label] of ticks) {
+    const x = m.X(i);
+    ctx.fillStyle = "#999"; ctx.textAlign = x > m.W - 40 ? "end" : "center";
+    ctx.fillText(label, x, m.H - 6);
+  }
+
+  const put = (arr, color) => {
+    const y = m.Y(arr[HOR]);
+    if (y < 12 || y > m.H - 16) return;      // clipped along with the band
+    ctx.fillStyle = color; ctx.textAlign = "end"; ctx.textBaseline = "middle";
+    ctx.fillText(fmtPrice(arr[HOR]), m.W - 4, y);
+  };
+  put(live.fanQ["0.10"], "rgba(207,34,46,.55)");
+  put(live.fanQ["0.90"], "rgba(207,34,46,.55)");
+  put(live.fanQ["0.50"], "#cf222e");
+  ctx.restore();
+}
+
 function redraw() {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   ctx.clearRect(0, 0, W, H);
@@ -283,7 +371,7 @@ function redraw() {
   }
   if (!live) {
     ctx.fillStyle = "#bbb"; ctx.font = "16px system-ui";
-    ctx.fillText("📡  pick a ticker and hit Forecast…", 24, H / 2);
+    ctx.fillText("pick a ticker and hit Forecast…", 24, H / 2);
     return;
   }
   const m = mapping();
@@ -310,17 +398,22 @@ function redraw() {
   band("0.25", "0.75", 0.10);
   polyline(live.fanQ["0.50"], CTX_N, m, "rgba(207,34,46,.45)", 1.5, [4, 4]);
 
-  // frozen context
-  polyline(live.context, 0, m, "#222", 2.5);
-
-  // the live price crawling through the band
-  if (live.actual.length) {
-    polyline([live.context[live.context.length - 1], ...live.actual], CTX_N, m, "#0969da", 2.5);
-    const lx = m.X(CTX_N + live.actual.length);
-    const ly = m.Y(live.actual[live.actual.length - 1]);
-    ctx.fillStyle = "#0969da";
-    ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, 2 * Math.PI); ctx.fill();
+  // frozen context + the live bars crawling through the band
+  if (candlesEl.checked) {
+    drawCandles(live.ctxBars, 0, m);
+    if (live.actualBars.length) drawCandles(live.actualBars, CTX_N + 1, m);
+  } else {
+    polyline(live.context, 0, m, "#222", 2.5);
+    if (live.actual.length) {
+      polyline([live.context[live.context.length - 1], ...live.actual], CTX_N, m, "#0969da", 2.5);
+      const lx = m.X(CTX_N + live.actual.length);
+      const ly = m.Y(live.actual[live.actual.length - 1]);
+      ctx.fillStyle = "#0969da";
+      ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, 2 * Math.PI); ctx.fill();
+    }
   }
+
+  drawAxes(m);
 }
 
 fitCanvas();
