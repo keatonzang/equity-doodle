@@ -36,6 +36,9 @@ def evaluate(m, prices, split_idx, scale, scale_name):
     contexts, actuals = [], []
     for ticker in prices.columns:
         col = prices[ticker].dropna()
+        col = col[col > 0]  # e.g. CL=F's negative April-2020 print breaks log-returns
+        if len(col) < 2:
+            continue
         rets = features.aggregate_returns(features.to_log_returns(col.to_numpy()), scale)
         start = int(len(rets) * SPLIT_FRAC)
         for o in range(max(start, C), len(rets) - H, STRIDE):

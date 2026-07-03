@@ -19,28 +19,34 @@ import pandas as pd
 from . import config, features
 
 
-def _build_return_series(prices: pd.DataFrame):
-    """Turn a wide price frame into a list of standardized, multi-scale
+def _build_return_series(prices: pd.DataFrame | list[pd.DataFrame]):
+    """Turn wide price frame(s) into a list of standardized, multi-scale
     log-return TimeSeries (a plain integer index; the calendar carries no
     signal we rely on).
 
     For every ticker we emit one series per scale in ``config.SCALES``, each
     z-scored to unit variance. Pooling these teaches one global model the shape
-    of price paths across time resolutions.
+    of price paths across time resolutions. Pass a list of frames to pool
+    several panels (e.g. daily + hourly + 15m) into one training set.
     """
     from darts import TimeSeries
 
+    frames = prices if isinstance(prices, list) else [prices]
     min_len = config.CONTEXT_LENGTH + config.HORIZON + 5
     series = []
-    for ticker in prices.columns:
-        col = prices[ticker].dropna()
-        rets = features.to_log_returns(col.to_numpy())
-        for k in config.SCALES:
-            agg = features.aggregate_returns(rets, k)
-            if len(agg) < min_len:
+    for frame in frames:
+        for ticker in frame.columns:
+            col = frame[ticker].dropna()
+            col = col[col > 0]  # bad prints / zero closes would break log-returns
+            if len(col) < 2:
                 continue
-            z, _, _ = features.standardize_returns(agg)
-            series.append(TimeSeries.from_values(z.astype("float32")))
+            rets = features.to_log_returns(col.to_numpy())
+            for k in config.SCALES:
+                agg = features.aggregate_returns(rets, k)
+                if len(agg) < min_len:
+                    continue
+                z, _, _ = features.standardize_returns(agg)
+                series.append(TimeSeries.from_values(z.astype("float32")))
     if not series:
         raise ValueError("no ticker had enough history to build a series")
     return series
@@ -77,6 +83,10 @@ def _pl_kwargs():
         "devices": 1,
         "enable_progress_bar": True,
         "enable_model_summary": False,
+        # See config: caps a huge-corpus "epoch" so validation/early stopping
+        # run every few minutes instead of once an hour.
+        "limit_train_batches": config.DL_LIMIT_TRAIN_BATCHES,
+        "limit_val_batches": config.DL_LIMIT_VAL_BATCHES,
         "callbacks": [
             EarlyStopping(monitor="val_loss", patience=8, min_delta=1e-4, mode="min")
         ],
