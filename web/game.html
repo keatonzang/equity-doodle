@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Beat the model: a real historical chart, hidden ticker. Draw what happens next, then see the truth — and whether you out-forecast a neural net." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Beat the Model — Equity Doodle 🎯" />
+<meta property="og:description" content="A real historical chart, hidden ticker. Draw what happens next, then see the truth — and whether you out-forecast a neural net." />
+<meta property="og:url" content="https://equity-doodle.vercel.app/game" />
+<meta property="og:image" content="https://equity-doodle.vercel.app/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎯</text></svg>" />
+<title>Beat the Model 🎯 — Equity Doodle</title>
+<style>
+  :root { --ink:#222; --accent:#cf222e; --guess:#1a7f37; --truth:#0969da; --grid:#eee; --muted:#666; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; padding: 24px; color: var(--ink); background:#fafafa; }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  p.sub { margin: 0 0 16px; color: var(--muted); }
+  p.sub a { color: var(--accent); text-decoration: none; }
+  .card { background:#fff; border:1px solid #e5e5e5; border-radius:12px;
+          padding:16px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  canvas { width:100%; height:420px; border:1px solid #e5e5e5; border-radius:8px;
+           touch-action:none; cursor: crosshair; background:#fff; }
+  .row { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+  button { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid #ccc;
+           background:#fff; cursor:pointer; }
+  button.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+  button:disabled { opacity:.5; cursor:default; }
+  .legend { display:flex; gap:16px; font-size:.85rem; color:var(--muted); margin-top:10px; flex-wrap:wrap; }
+  .swatch { display:inline-block; width:12px; height:12px; border-radius:2px;
+            margin-right:6px; vertical-align:middle; }
+  #verdict { display:none; margin-top:14px; padding:14px 16px; border-radius:8px;
+             background:#f6f8fa; border:1px solid #e5e5e5; font-size:.92rem; line-height:1.6; }
+  #verdict .headline { font-size:1.05rem; font-weight:600; margin-bottom:6px; }
+  #verdict table { border-collapse:collapse; margin:8px 0 2px; }
+  #verdict td { padding:2px 18px 2px 0; }
+  #verdict .num { font-variant-numeric: tabular-nums; }
+  footer { margin-top:18px; font-size:.78rem; color:var(--muted); line-height:1.5; }
+  footer .hire { display:block; margin-top:.5rem; font-size:.72rem; letter-spacing:.03em;
+                 color:var(--muted); text-decoration:none; opacity:.45;
+                 transition:opacity .15s, color .15s; }
+  footer .hire:hover { opacity:1; color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Beat the Model 🎯</h1>
+  <p class="sub">A real chart from history, ticker hidden. Draw what happens next — then see the truth,
+    and whether you out-forecast the neural net.
+    <a href="./">← back to the drawing board</a> · <a href="about.html">what is this?</a></p>
+
+  <div class="card">
+    <canvas id="board"></canvas>
+    <div class="row">
+      <button id="reveal" class="primary" disabled>Reveal what happened</button>
+      <button id="next">New chart</button>
+      <span id="status" style="color:var(--muted); font-size:.85rem;"></span>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#222"></span>history</span>
+      <span><span class="swatch" style="background:#1a7f37"></span>your guess</span>
+      <span><span class="swatch" style="background:#0969da"></span>what actually happened</span>
+      <span><span class="swatch" style="background:rgba(207,34,46,.45)"></span>model median (dashed)</span>
+      <span><span class="swatch" style="background:rgba(207,34,46,.18)"></span>model 10–90% band</span>
+    </div>
+    <div id="verdict"></div>
+  </div>
+
+  <footer>
+    <strong>Educational game — not financial advice.</strong> Charts are real historical windows
+    (daily, weekly, or monthly bars) from ~220 liquid assets. The global model was trained on this
+    corpus — with millions of overlapping, normalized windows it cannot memorize any single one,
+    but we say so anyway, because being honest is the whole point. Model inference runs entirely
+    in your browser.
+    <a class="hire" href="https://zang-labs.vercel.app" target="_blank" rel="noopener">Hire me</a>
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.js"></script>
+<script src="forecast.js"></script>
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const revealBtn = document.getElementById("reveal");
+const nextBtn = document.getElementById("next");
+const verdictEl = document.getElementById("verdict");
+
+const PAD = 16;
+let BANK = null;          // challenges.json payload
+let CTX_N = 60, HOR = 20; // overwritten from the bank
+let deck = [];            // shuffled indices, so charts don't repeat until exhausted
+
+let ch = null;            // current challenge
+let drawing = false;
+let rawPts = [];          // pixel polyline while the user draws
+let guess = null;         // finalized guess, prices at bars CTX_N+1 .. CTX_N+HOR
+let truthShown = false;
+let fanQ = null;          // model quantile paths in real price units (after reveal)
+let modelReady = false;
+
+statusEl.textContent = "loading model + charts…";
+Promise.all([
+  loadModel(),
+  fetch("challenges.json").then(r => {
+    if (!r.ok) throw new Error("challenges.json " + r.status);
+    return r.json();
+  }),
+]).then(([, bank]) => {
+  BANK = bank; CTX_N = bank.context_length; HOR = bank.horizon;
+  modelReady = true;
+  newChart();
+}).catch(err => { statusEl.textContent = "failed to load: " + err.message; });
+
+function drawnChallenge() {
+  if (!deck.length) {
+    deck = BANK.challenges.map((_, i) => i);
+    for (let i = deck.length - 1; i > 0; i--) {          // Fisher-Yates
+      const j = Math.floor(Math.random() * (i + 1));
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+  }
+  return BANK.challenges[deck.pop()];
+}
+
+function newChart() {
+  ch = drawnChallenge();
+  rawPts = []; guess = null; fanQ = null; truthShown = false;
+  revealBtn.disabled = true;
+  verdictEl.style.display = "none";
+  statusEl.textContent = "draw your continuation from the end of the line →";
+  redraw();
+}
+nextBtn.onclick = newChart;
+
+/* ------------------------------ chart mapping --------------------------- */
+
+function mapping() {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const nBars = CTX_N + HOR;                    // bar index 0..nBars
+  const X = i => PAD + (W - 2 * PAD) * (i / nBars);
+  // y-domain: context always; truth/fan/guess once revealed or drawn
+  const vals = ch.prices.slice(0, CTX_N + 1).slice();
+  if (truthShown) {
+    vals.push(...ch.prices.slice(CTX_N + 1));
+    if (fanQ) { vals.push(...fanQ["0.10"], ...fanQ["0.90"]); }
+  }
+  if (guess) vals.push(...guess);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const margin = (hi - lo || Math.abs(hi) || 1) * (truthShown ? 0.08 : 0.30);
+  lo -= margin; hi += margin;
+  const Y = p => H - PAD - (H - 2 * PAD) * ((p - lo) / (hi - lo));
+  const Yinv = y => lo + (hi - lo) * ((H - PAD - y) / (H - 2 * PAD));
+  return { W, H, X, Y, Yinv };
+}
+
+/* --------------------------------- drawing ------------------------------ */
+
+function fitCanvas() {
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * ratio;
+  canvas.height = canvas.clientHeight * ratio;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  redraw();
+}
+window.addEventListener("resize", fitCanvas);
+
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return { x: t.clientX - r.left, y: t.clientY - r.top };
+}
+
+function start(e) {
+  if (!ch || truthShown) return;
+  drawing = true; rawPts = []; guess = null;
+  addPoint(e); e.preventDefault();
+}
+function move(e) { if (drawing) { addPoint(e); e.preventDefault(); } }
+function end() {
+  if (!drawing) return;
+  drawing = false;
+  finalizeGuess();
+}
+
+function addPoint(e) {
+  const m = mapping();
+  const p = pos(e);
+  const xMin = m.X(CTX_N), xMax = m.X(CTX_N + HOR);
+  p.x = Math.min(Math.max(p.x, xMin), xMax);
+  if (!rawPts.length || p.x > rawPts[rawPts.length - 1].x + 0.5) rawPts.push(p);
+  redraw();
+}
+
+// Convert the pixel polyline into one price per future bar, anchored at the
+// last visible price. Flat-extends if the player stopped short of the edge.
+function finalizeGuess() {
+  if (rawPts.length < 2) { rawPts = []; redraw(); return; }
+  const m = mapping();
+  const anchor = { x: m.X(CTX_N), y: m.Y(ch.prices[CTX_N]) };
+  const pts = [anchor, ...rawPts];
+  guess = [];
+  for (let h = 1; h <= HOR; h++) {
+    const xt = m.X(CTX_N + h);
+    let j = 0;
+    while (j < pts.length - 2 && pts[j + 1].x < xt) j++;
+    const a = pts[j], b = pts[j + 1];
+    const f = b.x <= a.x ? 0 : Math.min((xt - a.x) / (b.x - a.x), 1);
+    const y = xt > pts[pts.length - 1].x ? pts[pts.length - 1].y : a.y + (b.y - a.y) * f;
+    guess.push(Math.max(m.Yinv(y), 1e-9));
+  }
+  rawPts = [];
+  revealBtn.disabled = false;
+  statusEl.textContent = "locked in — reveal when ready (or redraw)";
+  redraw();
+}
+
+canvas.addEventListener("mousedown", start);
+canvas.addEventListener("mousemove", move);
+window.addEventListener("mouseup", end);
+canvas.addEventListener("touchstart", start);
+canvas.addEventListener("touchmove", move);
+canvas.addEventListener("touchend", end);
+
+function polyline(vals, i0, stroke, width, dash) {
+  const m = mapping();
+  ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.lineJoin = "round";
+  ctx.setLineDash(dash || []);
+  ctx.beginPath();
+  vals.forEach((p, k) => {
+    const x = m.X(i0 + k), y = m.Y(p);
+    k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke(); ctx.setLineDash([]);
+}
+
+function redraw() {
+  const m = mapping();
+  ctx.clearRect(0, 0, m.W, m.H);
+
+  // gridlines + the "now" boundary
+  ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
+  for (let i = 1; i < 6; i++) {
+    const y = m.H * i / 6;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(m.W, y); ctx.stroke();
+  }
+  if (!ch) return;
+  const bx = m.X(CTX_N);
+  ctx.save();
+  ctx.strokeStyle = "#c9c9c9"; ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(bx, 8); ctx.lineTo(bx, m.H - 8); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#aaa"; ctx.font = "12px system-ui";
+  ctx.textAlign = "end"; ctx.fillText("history ", bx, 18);
+  ctx.textAlign = "start"; ctx.fillText(" your guess →", bx, 18);
+  ctx.restore();
+
+  // model fan + truth (post-reveal, under the lines)
+  if (truthShown && fanQ) {
+    const band = (loK, hiK, alpha) => {
+      ctx.beginPath();
+      for (let i = 0; i <= HOR; i++) { const x = m.X(CTX_N + i), y = m.Y(fanQ[hiK][i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+      for (let i = HOR; i >= 0; i--) ctx.lineTo(m.X(CTX_N + i), m.Y(fanQ[loK][i]));
+      ctx.closePath(); ctx.fillStyle = `rgba(207,34,46,${alpha})`; ctx.fill();
+    };
+    band("0.10", "0.90", 0.08);
+    band("0.25", "0.75", 0.10);
+    polyline(fanQ["0.50"], CTX_N, "rgba(207,34,46,.45)", 1.5, [4, 4]);
+  }
+
+  // history
+  polyline(ch.prices.slice(0, CTX_N + 1), 0, "#222", 2.5);
+
+  // truth
+  if (truthShown) polyline(ch.prices.slice(CTX_N), CTX_N, "#0969da", 2.5);
+
+  // the player's line: finalized guess, or the in-progress pixel polyline
+  if (guess) {
+    polyline([ch.prices[CTX_N], ...guess], CTX_N, "#1a7f37", 2.5);
+  } else if (rawPts.length > 1) {
+    ctx.strokeStyle = "#1a7f37"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+    ctx.beginPath();
+    rawPts.forEach((p, i) => { i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+    ctx.stroke();
+  } else if (!truthShown) {
+    ctx.fillStyle = "#bbb"; ctx.font = "16px system-ui";
+    ctx.fillText("✏️  continue the line from the dashed boundary…", bx + 12, m.H / 2);
+  }
+}
+
+/* --------------------------------- reveal ------------------------------- */
+
+const fmtPct = v => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+const missPct = (path, truth) => {
+  let s = 0;
+  for (let i = 0; i < truth.length; i++) s += Math.abs(Math.log(path[i] / truth[i]));
+  return (s / truth.length) * 100;                 // avg per-bar miss, in %
+};
+
+revealBtn.onclick = async () => {
+  if (!guess || truthShown) return;
+  statusEl.textContent = "asking the model…"; revealBtn.disabled = true;
+  try {
+    const context = ch.prices.slice(0, CTX_N + 1);
+    const res = await completeDoodle(context, HOR);
+    // completeDoodle works on a start=100 normalization; undo it to overlay
+    // the fan on real prices.
+    const scale = context[0] / 100;
+    fanQ = {};
+    for (const k of Object.keys(res.quantiles)) fanQ[k] = res.quantiles[k].map(v => v * scale);
+
+    truthShown = true;
+    const truth = ch.prices.slice(CTX_N + 1);
+    const youMiss = missPct(guess, truth);
+    const modelMiss = missPct(fanQ["0.50"].slice(1), truth);
+    let inBand = 0;
+    for (let i = 1; i <= HOR; i++) {
+      const t = ch.prices[CTX_N + i];
+      if (t >= fanQ["0.10"][i] && t <= fanQ["0.90"][i]) inBand++;
+    }
+    const youWin = youMiss < modelMiss;
+    verdictEl.innerHTML = `
+      <div class="headline">${youWin ? "🏆 You beat the model’s median!" : "🤖 The model’s median edged you out."}</div>
+      That was <strong>${ch.symbol}</strong>, ${ch.scale} bars,
+      ${ch.dates[0]} → ${ch.dates[1]}, with the answer running to ${ch.dates[2]}.
+      <table>
+        <tr><td>your average miss</td><td class="num"><strong>${youMiss.toFixed(2)}%</strong> per bar</td></tr>
+        <tr><td>model median’s miss</td><td class="num"><strong>${modelMiss.toFixed(2)}%</strong> per bar</td></tr>
+        <tr><td>model 10–90% band</td><td class="num">contained the truth on <strong>${inBand}/${HOR}</strong> bars</td></tr>
+        <tr><td>window stats</td><td class="num">context vol ${ch.stats.ctx_vol_ann_pct}%/yr ·
+          outcome ${fmtPct(ch.stats.out_ret_pct)} · max drawdown ${fmtPct(ch.stats.out_maxdd_pct)}</td></tr>
+      </table>`;
+    verdictEl.style.display = "block";
+    statusEl.textContent = "“New chart” to play again";
+    redraw();
+  } catch (err) {
+    statusEl.textContent = "error: " + err.message;
+    revealBtn.disabled = false;
+  }
+};
+
+fitCanvas();
+</script>
+</body>
+</html>

@@ -123,17 +123,20 @@ function empiricalQuantile(sorted, q) {
 /* ----------------------------- forecasting ------------------------------ */
 
 // Forecast `horizon` steps in z-space. Returns:
-//   { fan: [step][quantile], sample: [step] }
+//   { fan: [step][quantile], drawSample: () => [step] }
 // Steps within the first chunk use the network's exact quantiles; steps
 // beyond it use empirical quantiles over MC_SAMPLES autoregressive rollouts.
+// drawSample is cheap and can be called repeatedly ("roll another future"):
+// short horizons draw fresh inverse-CDF samples, long horizons hand out a
+// random one of the already-simulated MC paths.
 async function forecastZ(session, z, horizon) {
   const OC = META.output_chunk_length, L = META.quantiles;
   const first = (await runNet(session, [z]))[0];
 
   if (horizon <= OC) {
     const fan = first.slice(0, horizon);
-    const sample = fan.map(vals => sampleFromQuantiles(L, vals, Math.random()));
-    return { fan, sample };
+    const drawSample = () => fan.map(vals => sampleFromQuantiles(L, vals, Math.random()));
+    return { fan, drawSample };
   }
 
   // Monte-Carlo rollout: each simulation keeps its own context and path.
@@ -167,10 +170,35 @@ async function forecastZ(session, z, horizon) {
       fan[h] = L.map(q => empiricalQuantile(vals, q));
     }
   }
-  return { fan, sample: paths[0] };
+  const drawSample = () => paths[Math.floor(Math.random() * paths.length)];
+  return { fan, drawSample };
 }
 
 /* ------------------------------ public API ------------------------------ */
+
+// State of the most recent forecast, kept so the UI can cheaply draw fresh
+// sample paths ("roll another future") without re-running the network.
+let _lastForecast = null;
+
+// Turn one z-space sample draw into an anchor-prefixed price path, widening
+// its deviation from the median by the calibration factor (as _calibrate does).
+function _buildSamplePath(state) {
+  const { drawSample, medRets, mean, std, anchor, lam, horizon } = state;
+  const zs = drawSample();
+  const path = [anchor];
+  let cum = 0;
+  for (let h = 0; h < horizon; h++) {
+    const r = zs[h] * std + mean;
+    cum += medRets[h] + lam * (r - medRets[h]);
+    path.push(anchor * Math.exp(cum));
+  }
+  return path;
+}
+
+// Draw a fresh sample path from the most recent forecast (null if none yet).
+function resampleDoodle() {
+  return _lastForecast ? _buildSamplePath(_lastForecast) : null;
+}
 
 // Mirrors the old POST /api/forecast response shape, so the canvas code is
 // unchanged: quantile keys "0.05".."0.95", anchor-prefixed paths.
@@ -183,23 +211,20 @@ async function completeDoodle(drawnPrices, horizon) {
 
   const prices = normalizePath(resamplePath(drawnPrices, META.context_length + 1));
   const { z, mean, std } = standardize(toLogReturns(prices));
-  const { fan, sample } = await forecastZ(session, z, horizon);
+  const { fan, drawSample } = await forecastZ(session, z, horizon);
 
-  // z -> returns, then widen the fan (and sample) around the median by the
-  // conformal calibration factor, per step (forecast._calibrate).
+  // z -> returns, then widen the fan around the median by the conformal
+  // calibration factor, per step (forecast._calibrate).
   const anchor = prices[prices.length - 1];
+  const medRets = fan.map(vals => vals[medIdx] * std + mean);
   const qPaths = {};
   for (const q of L) qPaths[q.toFixed(2)] = [anchor];
-  const samplePath = [anchor];
-  let cum = {}, cumSample = 0;
+  let cum = {};
   for (const q of L) cum[q.toFixed(2)] = 0;
 
   for (let h = 0; h < horizon; h++) {
     const rets = fan[h].map(v => v * std + mean);
-    const med = rets[medIdx];
-    const rSample = sample[h] * std + mean;
-    cumSample += med + lam * (rSample - med);
-    samplePath.push(anchor * Math.exp(cumSample));
+    const med = medRets[h];
     L.forEach((q, i) => {
       const key = q.toFixed(2);
       cum[key] += med + lam * (rets[i] - med);
@@ -207,10 +232,12 @@ async function completeDoodle(drawnPrices, horizon) {
     });
   }
 
+  _lastForecast = { drawSample, medRets, mean, std, anchor, lam, horizon };
+
   return {
     context: { x: prices.map((_, i) => i), y: prices },
     forecast_x: Array.from({ length: horizon + 1 }, (_, i) => prices.length - 1 + i),
     quantiles: qPaths,
-    sample: samplePath,
+    sample: _buildSamplePath(_lastForecast),
   };
 }
