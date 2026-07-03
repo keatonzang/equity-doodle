@@ -6,6 +6,7 @@ same model is scored at both daily and weekly resolution. Reports directional
 accuracy and MAE vs a random-walk baseline, and saves a sample fan-chart.
 """
 
+import utils.session
 import sys
 import warnings
 from pathlib import Path

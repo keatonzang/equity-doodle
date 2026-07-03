@@ -30,32 +30,52 @@
   button.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
   button:disabled { opacity:.5; cursor:default; }
   label { font-size:.9rem; color:var(--muted); }
-  .legend { display:flex; gap:16px; font-size:.85rem; color:var(--muted); margin-top:10px; }
+  .legend { display:flex; gap:16px; font-size:.85rem; color:var(--muted); margin-top:10px; flex-wrap:wrap; }
   .swatch { display:inline-block; width:12px; height:12px; border-radius:2px;
             margin-right:6px; vertical-align:middle; }
+  .presets { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+  .presets span { font-size:.85rem; color:var(--muted); }
+  .presets button { padding:5px 10px; font-size:.85rem; }
   footer { margin-top:18px; font-size:.78rem; color:var(--muted); line-height:1.5; }
+  /* Subtle "Hire me" — its own line below the footer note, low-key until hover. */
+  footer .hire { display:block; margin-top:.5rem; font-size:.72rem; letter-spacing:.03em;
+                 color:var(--muted); text-decoration:none; opacity:.45;
+                 transition:opacity .15s, color .15s; }
+  footer .hire:hover { opacity:1; color:var(--accent); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Equity Doodle ✏️📈</h1>
-  <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation. <a href="about.html" style="color:#cf222e; text-decoration:none;">What is this? →</a></p>
+  <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation.
+    <a href="game.html" style="color:#cf222e; text-decoration:none;">🎮 Beat the model →</a> ·
+    <a href="about.html" style="color:#cf222e; text-decoration:none;">What is this? →</a></p>
 
   <div class="card">
     <canvas id="board"></canvas>
     <div class="row">
       <button id="complete" class="primary" disabled>Complete my chart</button>
+      <button id="reroll" disabled title="draw another sample from the same forecast">🎲 Roll another future</button>
       <button id="clear">Clear</button>
       <label>Horizon: <span id="hval">20</span> bars
         <input id="horizon" type="range" min="5" max="60" value="20" />
       </label>
       <span id="status" style="color:var(--muted); font-size:.85rem;"></span>
     </div>
+    <div class="presets">
+      <span>or stamp a “classic” pattern:</span>
+      <button data-preset="hs">Head &amp; shoulders</button>
+      <button data-preset="dt">Double top</button>
+      <button data-preset="flag">Bull flag</button>
+      <button data-preset="cup">Cup &amp; handle</button>
+      <button data-preset="walk">Random walk</button>
+    </div>
     <div class="legend">
       <span><span class="swatch" style="background:#222"></span>your doodle</span>
       <span><span class="swatch" style="background:#cf222e"></span>model continuation (sample)</span>
       <span><span class="swatch" style="background:rgba(207,34,46,.45)"></span>median (dashed)</span>
       <span><span class="swatch" style="background:rgba(207,34,46,.18)"></span>uncertainty band</span>
+      <span><span class="swatch" style="background:rgba(207,34,46,.14)"></span>earlier rolls</span>
     </div>
   </div>
 
@@ -66,6 +86,7 @@
     draw at any resolution (intraday, daily, weekly) and any price scale.
     The model runs <strong>entirely in your browser</strong> via ONNX Runtime — nothing you draw
     leaves the page.
+    <a class="hire" href="https://zang-labs.vercel.app" target="_blank" rel="noopener">Hire me</a>
   </footer>
 </div>
 
@@ -76,14 +97,17 @@ const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const completeBtn = document.getElementById("complete");
+const rerollBtn = document.getElementById("reroll");
 const clearBtn = document.getElementById("clear");
 const horizon = document.getElementById("horizon");
 const hval = document.getElementById("hval");
 
 const DRAW_LIMIT = 0.66;  // draw only in the left part; the model fills the right
+const MAX_GHOSTS = 12;
 let drawing = false;
 let points = [];          // {x, y} in canvas pixels, as the user draws
 let result = null;        // last forecast response
+let ghosts = [];          // sample paths from earlier rolls (price space)
 let view = null;          // pixel transform captured at request time
 let modelReady = false;
 
@@ -112,7 +136,7 @@ function pos(e) {
   return { x: t.clientX - r.left, y: t.clientY - r.top };
 }
 
-function start(e) { drawing = true; points = []; result = null; addPoint(e); e.preventDefault(); }
+function start(e) { drawing = true; points = []; result = null; ghosts = []; rerollBtn.disabled = true; addPoint(e); e.preventDefault(); }
 function move(e)  { if (drawing) { addPoint(e); e.preventDefault(); } }
 function end()    { drawing = false; completeBtn.disabled = !modelReady || points.length < 5; }
 
@@ -132,8 +156,67 @@ canvas.addEventListener("touchstart", start);
 canvas.addEventListener("touchmove", move);
 canvas.addEventListener("touchend", end);
 
-clearBtn.onclick = () => { points = []; result = null; completeBtn.disabled = true; statusEl.textContent = modelReady ? "model ready — draw!" : statusEl.textContent; redraw(); };
+clearBtn.onclick = () => { points = []; result = null; ghosts = []; completeBtn.disabled = true; rerollBtn.disabled = true; statusEl.textContent = modelReady ? "model ready — draw!" : statusEl.textContent; redraw(); };
 horizon.oninput = () => { hval.textContent = horizon.value; };
+
+rerollBtn.onclick = () => {
+  if (!result) return;
+  ghosts.push(result.sample);
+  if (ghosts.length > MAX_GHOSTS) ghosts.shift();
+  result = { ...result, sample: resampleDoodle() };
+  redraw();
+};
+
+// ------------------------- classic-pattern presets -------------------------
+// Shapes as (t, v) control points, t across the draw region, v in 0..1 (1 = high).
+// Stamped with a little jitter so they read as hand-drawn, not clip-art.
+const PRESET_SHAPES = {
+  hs:   [[0,.30],[.08,.42],[.16,.38],[.26,.62],[.34,.44],[.42,.46],[.55,.90],[.66,.46],[.72,.44],[.82,.64],[.90,.40],[1,.30]],
+  dt:   [[0,.25],[.15,.45],[.30,.80],[.42,.55],[.55,.58],[.68,.82],[.80,.55],[.90,.42],[1,.35]],
+  flag: [[0,.15],[.12,.28],[.25,.42],[.38,.72],[.44,.68],[.50,.74],[.56,.66],[.62,.71],[.68,.63],[.76,.68],[.84,.60],[1,.62]],
+  cup:  [[0,.72],[.10,.62],[.22,.45],[.35,.35],[.48,.34],[.60,.42],[.70,.58],[.78,.70],[.84,.62],[.90,.58],[1,.66]],
+};
+
+function presetValues(key, n) {
+  if (key === "walk") {                       // an honest random walk, rescaled to 0..1
+    const v = [0];
+    for (let i = 1; i < n; i++) {
+      const u1 = Math.random() || 1e-12, u2 = Math.random();
+      v.push(v[i - 1] + Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2));
+    }
+    const lo = Math.min(...v), hi = Math.max(...v);
+    return v.map(x => (x - lo) / (hi - lo || 1));
+  }
+  const shape = PRESET_SHAPES[key];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    let j = 0;
+    while (j < shape.length - 2 && shape[j + 1][0] < t) j++;
+    const [t0, v0] = shape[j], [t1, v1] = shape[j + 1];
+    const f = t1 === t0 ? 0 : (t - t0) / (t1 - t0);
+    out.push(v0 + (v1 - v0) * f);
+  }
+  return out;
+}
+
+function stampPreset(key) {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const x0 = 24, x1 = W * DRAW_LIMIT - 8, n = 64;
+  const vals = presetValues(key, n);
+  points = vals.map((v, i) => ({
+    x: x0 + (x1 - x0) * i / (n - 1),
+    y: H * 0.78 - v * H * 0.56 + (Math.random() - 0.5) * H * 0.012,
+  }));
+  result = null; ghosts = [];
+  completeBtn.disabled = !modelReady;
+  rerollBtn.disabled = true;
+  redraw();
+}
+
+document.querySelectorAll(".presets button").forEach(b => {
+  b.onclick = () => stampPreset(b.dataset.preset);
+});
 
 function gridlines(W, H) {
   ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
@@ -234,6 +317,14 @@ function drawForecast(T) {
   band("0.10", "0.90", 0.08);
   band("0.25", "0.75", 0.10);
 
+  // ghosts of earlier rolls — many plausible futures accumulating
+  ctx.strokeStyle = "rgba(207,34,46,.14)"; ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+  for (const g of ghosts) {
+    ctx.beginPath();
+    for (let i = 0; i <= H && i < g.length; i++) { const [x, y] = P(i, g[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+  }
+
   // faint median (dashed) for reference
   if (q["0.50"]) {
     ctx.strokeStyle = "rgba(207,34,46,.35)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
@@ -266,10 +357,12 @@ completeBtn.onclick = async () => {
   }
   // capture the transform so the forecast maps back to the doodle's pixel scale
   view = { H, y0: points[0].y, x0, x1 };
-  statusEl.textContent = "thinking…"; completeBtn.disabled = true;
+  statusEl.textContent = "thinking…"; completeBtn.disabled = true; rerollBtn.disabled = true;
   try {
+    ghosts = [];
     result = await completeDoodle(prices, parseInt(horizon.value, 10));
-    statusEl.textContent = "done — clear to draw again";
+    statusEl.textContent = "done — roll more futures, or clear to draw again";
+    rerollBtn.disabled = false;
     redraw();
   } catch (err) {
     statusEl.textContent = "error: " + err.message;

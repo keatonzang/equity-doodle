@@ -32,11 +32,16 @@
   ul { padding-left:20px; }
   li { margin:6px 0; }
   footer { margin-top:22px; font-size:.8rem; color:var(--muted); line-height:1.55; }
+  /* Subtle "Hire me" — its own line below the footer note, low-key until hover. */
+  footer .hire { display:block; margin-top:.5rem; font-size:.72rem; letter-spacing:.03em;
+                 color:var(--muted); text-decoration:none; opacity:.45;
+                 transition:opacity .15s, color .15s; }
+  footer .hire:hover { opacity:1; color:var(--accent); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="nav"><a href="./">← back to the drawing board</a></div>
+  <div class="nav"><a href="./">← back to the drawing board</a> · <a href="game.html">🎯 beat the model</a></div>
 
   <h1>About Equity Doodle ✏️📈</h1>
   <p class="sub">Draw the start of a chart — let the model doodle the rest.</p>
@@ -111,12 +116,20 @@
       interactive UI — and to let the model's own uncertainty <em>show you</em> why "the chart
       tells you where it's going" is mostly a story we tell ourselves.
     </p>
+    <p>
+      Don't take our word for it: <a href="game.html">play <strong>Beat the Model</strong></a>.
+      You get a real historical chart with the ticker hidden, you draw what happens next, and
+      then the truth is revealed alongside the model's fan — with the score. Most people
+      discover they can't reliably beat it. Neither can it reliably beat a coin flip. That's
+      the lesson.
+    </p>
 
     <footer>
       <strong>Educational case study — not financial advice.</strong> Forecasts come from a
       statistical model fit on historical data and are very likely wrong. Do not make financial
       decisions based on this. Provided as-is, without warranty or liability.
       <br />Source &amp; license: <a href="https://github.com/keatonzang/equity-doodle">github.com/keatonzang/equity-doodle</a>
+      <a class="hire" href="https://zang-labs.vercel.app" target="_blank" rel="noopener">Hire me</a>
     </footer>
   </div>
 </div>
