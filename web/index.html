@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="Draw the start of a stock chart and a neural time-series model doodles a probabilistic continuation — entirely in your browser." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Equity Doodle ✏️📈" />
+<meta property="og:title" content="Equity Doodle" />
 <meta property="og:description" content="Draw the start of a stock chart and a neural time-series model doodles a probabilistic continuation — entirely in your browser." />
 <meta property="og:url" content="https://equity-doodle.vercel.app/" />
 <meta property="og:image" content="https://equity-doodle.vercel.app/og.png" />
 <meta name="twitter:card" content="summary_large_image" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✏️</text></svg>" />
-<title>Equity Doodle ✏️📈</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><polyline points=%2212,78 36,44 56,60 88,22%22 fill=%22none%22 stroke=%22%23cf222e%22 stroke-width=%2214%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>" />
+<title>Equity Doodle</title>
 <style>
   :root { --ink:#222; --accent:#cf222e; --grid:#eee; --muted:#666; }
   * { box-sizing: border-box; }
@@ -46,17 +46,17 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Equity Doodle ✏️📈</h1>
+  <h1>Equity Doodle</h1>
   <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation.
-    <a href="game.html" style="color:#cf222e; text-decoration:none;">🎮 Beat the model →</a> ·
-    <a href="live.html" style="color:#cf222e; text-decoration:none;">📡 Live audit →</a> ·
+    <a href="game.html" style="color:#cf222e; text-decoration:none;">Beat the model →</a> ·
+    <a href="live.html" style="color:#cf222e; text-decoration:none;">Live audit →</a> ·
     <a href="about.html" style="color:#cf222e; text-decoration:none;">What is this? →</a></p>
 
   <div class="card">
     <canvas id="board"></canvas>
     <div class="row">
       <button id="complete" class="primary" disabled>Complete my chart</button>
-      <button id="reroll" disabled title="draw another sample from the same forecast">🎲 Roll another future</button>
+      <button id="reroll" disabled title="draw another sample from the same forecast">Roll another future</button>
       <button id="clear">Clear</button>
       <label>Horizon: <span id="hval">20</span> bars
         <input id="horizon" type="range" min="5" max="60" value="20" />
@@ -236,11 +236,11 @@ function stampPreset(key) {
   }));
   // Folklore continuation: from the end of the setup out to the right edge, on
   // the same value scale. No jitter — it's a reference line, not a drawing.
-  // Spans [x1, W-16], the same span scene() uses for the forecast, so the two
+  // Spans [x1, W], the same span scene() uses for the forecast, so the two
   // are directly comparable bar-for-bar.
   const tb = PRESET_SHAPES[key] && PRESET_SHAPES[key].textbook;
   if (tb) {
-    const m = 24, xr = W - 16;
+    const m = 24, xr = W;
     const tv = sampleShape(tb, m);
     textbook = tv.map((v, i) => ({ x: x1 + (xr - x1) * i / (m - 1), y: vy(v) }));
     textbook[0] = { x: x1, y: points[points.length - 1].y };  // join the stamp exactly
@@ -281,7 +281,7 @@ function scene() {
   const horizon = fx.length - 1;
   const basePrice = (view.H - view.y0) + 10;
   const Yp = p => (view.H + 10) - p * basePrice / 100;   // price -> natural y
-  const right = canvas.clientWidth - 16;                 // always fill out to the right edge
+  const right = canvas.clientWidth;                      // fill flush to the right border
   const Xn = i => view.x1 + (right - view.x1) * (i / horizon);  // forecast bar -> natural x
   const sampleLine = result.sample || q["0.50"];
   return { q, horizon, Yp, Xn, sampleLine, median: q["0.50"] };
@@ -293,6 +293,7 @@ function scene() {
 function computeTransform() {
   const W = canvas.clientWidth, H = canvas.clientHeight, pad = 16;
   const identity = (x, y) => [x, y];
+  identity.invY = y => y;                                 // for axis labels
   if (!result || !view) return identity;
 
   const s = scene();
@@ -306,15 +307,19 @@ function computeTransform() {
   }
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const inBounds = minX >= pad && maxX <= W - pad && minY >= pad && maxY <= H - pad;
+  // x runs flush to the canvas borders (the forecast must touch the right
+  // edge); only y keeps a pad.
+  const inBounds = minX >= 0 && maxX <= W && minY >= pad && maxY <= H - pad;
   if (inBounds) return identity;                          // fits as-drawn: don't touch it
 
   // Overflow: stretch the content box to fill the area (width AND height) so the
   // forecast always reaches the right edge. Bands are excluded from the box, so the
   // vertical adjustment stays mild -- it fits only the doodle + sample + median.
-  const sx = (W - 2 * pad) / (maxX - minX || 1);
+  const sx = W / (maxX - minX || 1);
   const sy = (H - 2 * pad) / (maxY - minY || 1);
-  return (x, y) => [pad + (x - minX) * sx, pad + (y - minY) * sy];
+  const T = (x, y) => [(x - minX) * sx, pad + (y - minY) * sy];
+  T.invY = yPix => minY + (yPix - pad) / sy;              // for axis labels
+  return T;
 }
 
 function drawDoodle(T) {
@@ -333,13 +338,64 @@ function redraw() {
 
   if (!points.length && !result) {
     ctx.fillStyle = "#bbb"; ctx.font = "16px system-ui";
-    ctx.fillText("✏️  draw a price line here, left to right…", 24, H / 2);
+    ctx.fillText("draw a price line here, left to right…", 24, H / 2);
     return;
   }
   const T = computeTransform();
   drawTextbook(T);                     // folklore reference, under everything
   drawDoodle(T);                       // your line — shape always preserved
-  if (result) drawForecast(T);
+  if (result) { drawForecast(T); drawAxes(T); }
+}
+
+// Axis annotations, drawn once a forecast exists. A doodle has no real units,
+// so time is labeled in bars relative to "now" (the end of your drawing; the
+// history is resampled to the model's context length) and price as % change
+// from the last drawn value.
+function drawAxes(T) {
+  const s = scene();
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const anchorP = s.median ? s.median[0] : s.sampleLine[0];
+  const basePrice = (view.H - view.y0) + 10;
+  const priceAt = yNat => ((view.H + 10) - yNat) * 100 / basePrice;  // inverse of Yp
+  const fmtPct = (v, dp) => (v > 0 ? "+" : "") + v.toFixed(dp) + "%";
+  ctx.save();
+  ctx.font = "11px system-ui";
+
+  // y: % vs the anchor at each horizontal gridline
+  ctx.fillStyle = "#999"; ctx.textAlign = "start"; ctx.textBaseline = "bottom";
+  for (let i = 1; i < 6; i++) {
+    const yPix = H * i / 6;
+    const pct = (priceAt(T.invY(yPix)) / anchorP - 1) * 100;
+    ctx.fillText(fmtPct(pct, Math.abs(pct) < 3 ? 1 : 0), 4, yPix - 2);
+  }
+
+  // x: bar offsets relative to "now"
+  ctx.textBaseline = "alphabetic";
+  const CTXB = META ? META.context_length : 60;
+  const histX = k => view.x1 - (view.x1 - view.x0) * (k / CTXB);
+  const step = s.horizon <= 20 ? 5 : s.horizon <= 40 ? 10 : 20;
+  const ticks = [[histX(40), "-40"], [histX(20), "-20"], [view.x1, "now"]];
+  for (let k = step; k <= s.horizon; k += step) ticks.push([s.Xn(k), "+" + k]);
+  ticks[0][1] += " bars";
+  for (const [xNat, label] of ticks) {
+    const [x] = T(xNat, 0);
+    ctx.textAlign = x > W - 30 ? "end" : "center";
+    ctx.fillText(label, x, H - 6);
+  }
+
+  // predicted % at the end of the horizon: median (red) and the 10–90% band
+  const put = (arr, color) => {
+    if (!arr) return;
+    const [x, y] = T(s.Xn(s.horizon), s.Yp(arr[s.horizon]));
+    if (y < 12 || y > H - 16) return;              // clipped along with the band
+    const pct = (arr[s.horizon] / anchorP - 1) * 100;
+    ctx.fillStyle = color; ctx.textAlign = "end"; ctx.textBaseline = "middle";
+    ctx.fillText(fmtPct(pct, 1), x - 4, y);
+  };
+  put(s.q["0.10"], "rgba(207,34,46,.55)");
+  put(s.q["0.90"], "rgba(207,34,46,.55)");
+  put(s.median, "#cf222e");
+  ctx.restore();
 }
 
 // The preset's textbook continuation: what chart folklore says comes next.

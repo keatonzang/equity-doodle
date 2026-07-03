@@ -6,8 +6,9 @@
  * Vercel env vars — this file is the one-file change.
  *
  * GET /api/chart?symbol=AAPL&interval=1m
- * -> { symbol, name, currency, exchange, interval, bars: [{ t, c }] }
- *    t = unix seconds, c = close. Nulls (halts, gaps) are dropped upstream.
+ * -> { symbol, name, currency, exchange, interval, bars: [{ t, o, h, l, c }] }
+ *    t = unix seconds, o/h/l/c = OHLC (o/h/l may be null on sparse bars).
+ *    Bars with a null close (halts, gaps) are dropped.
  */
 "use strict";
 
@@ -31,12 +32,18 @@ async function fromYahoo(symbol, interval) {
     throw new Error(why || "no data for that symbol");
   }
   const ts = res.timestamp || [];
-  const closes =
-    (res.indicators && res.indicators.quote && res.indicators.quote[0] &&
-     res.indicators.quote[0].close) || [];
+  const q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
   const bars = [];
   for (let i = 0; i < ts.length; i++) {
-    if (closes[i] != null) bars.push({ t: ts[i], c: closes[i] });
+    if (q.close && q.close[i] != null) {
+      bars.push({
+        t: ts[i],
+        o: q.open ? q.open[i] : null,
+        h: q.high ? q.high[i] : null,
+        l: q.low ? q.low[i] : null,
+        c: q.close[i],
+      });
+    }
   }
   const meta = res.meta || {};
   return {
@@ -66,7 +73,9 @@ async function fromFinnhub(symbol, interval) {
   if (body.s !== "ok") throw new Error("no data for that symbol");
   const bars = [];
   for (let i = 0; i < body.t.length; i++) {
-    if (body.c[i] != null) bars.push({ t: body.t[i], c: body.c[i] });
+    if (body.c[i] != null) {
+      bars.push({ t: body.t[i], o: body.o[i], h: body.h[i], l: body.l[i], c: body.c[i] });
+    }
   }
   return {
     symbol: symbol.toUpperCase(),
