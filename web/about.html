@@ -51,9 +51,10 @@
       Equity Doodle is an <strong>educational case study</strong> that turns stock-chart
       "completion" into a time-series forecasting problem. The segment you draw becomes a
       model's <strong>input context window</strong>, and the continuation it sketches is the
-      <strong>forecast horizon</strong>. One <em>global</em> model is trained across ~230
-      assets — equities, ETFs, crypto, FX, commodities, rates — and many time resolutions,
-      so it learns the general grammar of price paths rather than memorizing a single ticker.
+      <strong>forecast horizon</strong>. One <em>global</em> model is trained across ~530
+      assets — equities, ETFs, indices, futures, crypto, FX, commodities, rates — with daily
+      history back to 1980 plus intraday panels, across many time resolutions, so it learns
+      the general grammar of price paths rather than memorizing a single ticker.
     </p>
 
     <h2>How it works</h2>
@@ -106,8 +107,8 @@
       not a defect in the model — it's a direct, visual demonstration of how little of future price
       movement is determined by the shape of the recent past. The wide fan <em>is</em> the result:
       it's the efficient-market intuition, drawn. The honest backtests reflect the same story —
-      directional accuracy at a coin flip on daily data (only modestly above on weekly), and error
-      barely better than a random walk.
+      directional accuracy at a coin flip on daily data (only modestly above on weekly), and
+      point error no better than a random walk.
     </p>
 
     <h2>Why this matters as a study</h2>

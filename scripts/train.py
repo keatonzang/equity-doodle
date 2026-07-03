@@ -1,4 +1,4 @@
-"""Train the global quantile model on cached prices."""
+"""Train the global quantile model on all cached price panels (daily + intraday)."""
 
 import sys
 from pathlib import Path
@@ -9,9 +9,10 @@ from equity_doodle import data, model
 
 
 def main() -> None:
-    prices = data.load_cached()
-    print(f"Training on {prices.shape[1]} tickers, {prices.shape[0]} rows...")
-    m = model.train(prices)
+    frames = data.load_training_frames()
+    for f in frames:
+        print(f"panel: {f.shape[1]} tickers x {f.shape[0]} rows")
+    m = model.train(frames)
     path = model.save(m)
     print(f"Saved trained model -> {path}")
 
