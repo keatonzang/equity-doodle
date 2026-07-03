@@ -16,6 +16,7 @@
 
 const MC_SAMPLES = 200;      // rollout simulations for horizon > OUTPUT_CHUNK
 const STD_FLOOR = 1e-9;      // flat-line guard, as in features.standardize_returns
+const FLAT_VOL_FALLBACK = 0.01;  // assumed vol for a flat doodle (features.FLAT_VOL_FALLBACK)
 
 let META = null;             // model_meta.json content
 let _session = null;
@@ -66,7 +67,11 @@ function standardize(returns) {
   const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
   const varSum = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length;
   let std = Math.sqrt(varSum);
-  if (std <= STD_FLOOR) std = 1.0;
+  // A perfectly flat doodle has no volatility scale of its own; falling back to
+  // std=1.0 would rescale predictions to 100%-per-bar volatility and blow up
+  // the fan. Assume a typical daily-equity vol instead, so the model's samples
+  // stay lively but sane (and continuous with an almost-flat hand drawing).
+  if (std <= STD_FLOOR) std = FLAT_VOL_FALLBACK;
   return { z: returns.map(r => (r - mean) / std), mean, std };
 }
 

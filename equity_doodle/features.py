@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import numpy as np
 
+# Volatility assumed for a zero-variance (perfectly flat) window, roughly a
+# typical daily-equity log-return std. See standardize_returns.
+FLAT_VOL_FALLBACK = 0.01
+
 
 def to_log_returns(prices: np.ndarray) -> np.ndarray:
     """Convert a 1-D price path to log-returns: r_t = ln(p_t / p_{t-1}).
@@ -42,7 +46,13 @@ def standardize_returns(returns: np.ndarray) -> tuple[np.ndarray, float, float]:
     returns = np.asarray(returns, dtype="float64")
     mean = float(returns.mean())
     std = float(returns.std())
-    std = std if std > 1e-9 else 1.0   # guard a flat line
+    # A zero-variance window (a perfectly flat doodle) has no volatility scale
+    # of its own. Falling back to std=1.0 would destandardize predictions at
+    # 100%-per-bar volatility and blow up the fan; instead assume a typical
+    # daily-equity vol so the forecast stays lively but sane. ~0.5-1%/bar is
+    # also what an almost-flat hand drawing works out to, so behavior stays
+    # continuous as a doodle approaches perfectly flat.
+    std = std if std > 1e-9 else FLAT_VOL_FALLBACK
     return (returns - mean) / std, mean, std
 
 
