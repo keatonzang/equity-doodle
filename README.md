@@ -6,9 +6,10 @@ Equity Doodle is a case-study project that frames stock-chart "completion" as a
 time-series forecasting problem: the segment you draw is the model's **input
 context window**, and the continuation it sketches is the **forecast horizon**.
 
-A single *global* model is trained across ~230 liquid assets — equities, ETFs,
-crypto, FX, commodities, rates — so it learns the general "grammar" of price
-paths rather than memorizing one ticker. The trained network ships as a ~1 MB
+A single *global* model is trained across ~530 liquid assets — equities, ETFs,
+indices, futures, crypto, FX, commodities, rates — with daily history back to
+1980 plus hourly and 15-minute intraday panels, so it learns the general
+"grammar" of price paths rather than memorizing one ticker. The trained network ships as a ~1 MB
 ONNX file and runs **entirely in your browser**: the deployed app is a static
 site with no backend, and nothing you draw ever leaves the page.
 
@@ -30,7 +31,9 @@ site with no backend, and nothing you draw ever leaves the page.
    log-returns ─► z-score ─► N-HiTS (ONNX, in-browser) ─► calibrated fan ─► rebuild price
 ```
 
-1. **Data** — daily OHLCV for the asset universe via `yfinance` (2005 →).
+1. **Data** — daily closes for the asset universe via `yfinance` (1980 →),
+   plus hourly (≤730 d) and 15-minute (≤60 d) intraday panels pooled into the
+   same training set (see `config.INTRADAY`).
 2. **Features** — prices are converted to **log-returns** (stationary and
    comparable across tickers), then **z-scored per window**, so an arbitrary
    hand-drawn chart at any price scale can be fed in directly.

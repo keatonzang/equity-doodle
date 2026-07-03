@@ -45,6 +45,10 @@ def _trainer_kwargs(early_stop: bool):
         "devices": 1,
         "enable_progress_bar": False,
         "enable_model_summary": False,
+        # Cap huge-corpus epochs so validation/early stopping stay frequent
+        # (see config.DL_LIMIT_TRAIN_BATCHES).
+        "limit_train_batches": config.DL_LIMIT_TRAIN_BATCHES,
+        "limit_val_batches": config.DL_LIMIT_VAL_BATCHES,
     }
     if early_stop:
         kw["callbacks"] = [
@@ -149,21 +153,27 @@ CANDIDATES = {
 # --------------------------------------------------------------------------- #
 def build_train_series(prices, split_frac=SPLIT_FRAC):
     """Standardized, multi-scale return series from the first ``split_frac`` of
-    each ticker's history (the honest training region)."""
+    each ticker's history (the honest training region). Accepts a single wide
+    price frame or a list of frames (e.g. daily + hourly + 15m panels)."""
     from darts import TimeSeries
 
+    frames = prices if isinstance(prices, list) else [prices]
     min_len = config.CONTEXT_LENGTH + config.HORIZON + 5
     series = []
-    for ticker in prices.columns:
-        col = prices[ticker].dropna().to_numpy()
-        col = col[: int(len(col) * split_frac)]
-        rets = features.to_log_returns(col)
-        for k in config.SCALES:
-            agg = features.aggregate_returns(rets, k)
-            if len(agg) < min_len:
+    for frame in frames:
+        for ticker in frame.columns:
+            col = frame[ticker].dropna()
+            col = col[col > 0].to_numpy()  # bad prints would break log-returns
+            col = col[: int(len(col) * split_frac)]
+            if len(col) < 2:
                 continue
-            z, _, _ = features.standardize_returns(agg)
-            series.append(TimeSeries.from_values(z.astype("float32")))
+            rets = features.to_log_returns(col)
+            for k in config.SCALES:
+                agg = features.aggregate_returns(rets, k)
+                if len(agg) < min_len:
+                    continue
+                z, _, _ = features.standardize_returns(agg)
+                series.append(TimeSeries.from_values(z.astype("float32")))
     return series
 
 

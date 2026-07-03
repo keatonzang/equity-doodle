@@ -35,6 +35,51 @@ def download_prices(
     return close
 
 
+def download_intraday(
+    interval: str,
+    period: str,
+    tickers: list[str] | None = None,
+    chunk: int = 40,
+) -> pd.DataFrame:
+    """Download intraday close prices for the universe, chunked to stay polite
+    with Yahoo. Same wide (timestamp x ticker) shape as :func:`download_prices`;
+    the union index interleaves 24/7 crypto bars with exchange-hours equity
+    bars, and per-ticker ``dropna`` downstream handles that fine.
+    """
+    import time
+
+    tickers = tickers or config.TICKERS
+    frames = []
+    for i in range(0, len(tickers), chunk):
+        batch = tickers[i : i + chunk]
+        raw = yf.download(
+            batch,
+            period=period,
+            interval=interval,
+            auto_adjust=True,
+            progress=False,
+            group_by="column",
+        )
+        if raw.empty:
+            continue
+        close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]]
+        frames.append(close)
+        time.sleep(1.0)
+    if not frames:
+        raise ValueError(f"no intraday data returned for interval={interval}")
+    out = pd.concat(frames, axis=1).sort_index()
+    return out.dropna(how="all").dropna(axis=1, how="all")
+
+
+def load_training_frames() -> list[pd.DataFrame]:
+    """All cached price panels for training: daily + any intraday caches."""
+    frames = [load_cached()]
+    for _interval, (_period, name) in config.INTRADAY.items():
+        if (config.DATA_DIR / name).exists():
+            frames.append(load_cached(name))
+    return frames
+
+
 def cache_prices(df: pd.DataFrame, name: str = "prices.parquet") -> str:
     """Persist a price frame to the local (git-ignored) data directory."""
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)

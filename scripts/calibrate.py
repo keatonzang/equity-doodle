@@ -32,21 +32,33 @@ import scripts.compare_models as cmp
 
 TRAIN_FRAC = 0.70
 CAL_FRAC = 0.85          # calibrate on [TRAIN_FRAC, CAL_FRAC), test on [CAL_FRAC, 1)
-STRIDE = 10
+STRIDE = 25              # origin stride; the expanded corpus has ~4x the tickers
 LAMBDA_GRID = np.round(np.arange(1.0, 3.01, 0.05), 2)
 TARGET = 0.80            # nominal coverage of the 10-90% band
 
 
 def train_nhits():
-    """Train the bake-off winner on the first TRAIN_FRAC of each series."""
+    """Train the bake-off winner on the first TRAIN_FRAC of each series, over
+    the same pooled panels (daily + intraday) the production model sees."""
     print(f"[calibrate] training nhits on first {int(TRAIN_FRAC*100)}% ...", flush=True)
     model, _ = cmp.build_nhits()
-    prices = data.load_cached()
-    series = cmp.build_train_series(prices, split_frac=TRAIN_FRAC)
+    frames = data.load_training_frames()
+    series = cmp.build_train_series(frames, split_frac=TRAIN_FRAC)
     val = series[::8]
     train = [s for i, s in enumerate(series) if i % 8 != 0]
     model.fit(train, val_series=val)
     return model
+
+
+def eval_sets():
+    """(frame, scale, name) evaluation slices: daily + weekly from the daily
+    panel, plus hourly if the intraday cache exists — the /live page runs on
+    intraday bars, so its coverage is audited here too."""
+    sets = [(data.load_cached(), 1, "daily"), (data.load_cached(), 5, "weekly")]
+    _, name = config.INTRADAY.get("1h", (None, "prices_1h.parquet"))
+    if (config.DATA_DIR / name).exists():
+        sets.append((data.load_cached(name), 1, "hourly"))
+    return sets
 
 
 def gather(prices, scale, lo_frac, hi_frac):
@@ -55,6 +67,9 @@ def gather(prices, scale, lo_frac, hi_frac):
     contexts, actuals = [], []
     for ticker in prices.columns:
         col = prices[ticker].dropna()
+        col = col[col > 0]  # bad prints would break log-returns
+        if len(col) < 2:
+            continue
         rets = features.aggregate_returns(features.to_log_returns(col.to_numpy()), scale)
         lo = max(int(len(rets) * lo_frac), C)
         hi = min(int(len(rets) * hi_frac), len(rets) - H)
@@ -93,13 +108,12 @@ def pinball(stats, actuals, lam):
 
 def main():
     model = train_nhits()
-    prices = data.load_cached()
-    scales = [(1, "daily"), (5, "weekly")]
+    sets = eval_sets()
 
-    # --- calibration: pool both scales, pick lambda closest to TARGET coverage
+    # --- calibration: pool all scales, pick lambda closest to TARGET coverage
     cal = {name: (cum_stats(model, c), a)
-           for s, name in scales
-           for c, a in [gather(prices, s, TRAIN_FRAC, CAL_FRAC)]}
+           for frame, s, name in sets
+           for c, a in [gather(frame, s, TRAIN_FRAC, CAL_FRAC)]}
 
     def pooled_cov(lam):
         covs, ns = [], []
@@ -120,8 +134,8 @@ def main():
     print(f"{'scale':<8}{'cov_before':>12}{'cov_after':>12}"
           f"{'pin_before':>12}{'pin_after':>12}")
     print("-" * 70)
-    for s, name in scales:
-        c, a = gather(prices, s, CAL_FRAC, 1.0)
+    for frame, s, name in sets:
+        c, a = gather(frame, s, CAL_FRAC, 1.0)
         st = cum_stats(model, c)
         print(f"{name:<8}{coverage(st, a, 1.0):>12.3f}{coverage(st, a, best_lam):>12.3f}"
               f"{pinball(st, a, 1.0):>12.4f}{pinball(st, a, best_lam):>12.4f}")
