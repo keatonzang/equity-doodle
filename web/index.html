@@ -49,6 +49,7 @@
   <h1>Equity Doodle ✏️📈</h1>
   <p class="sub">Draw the start of a chart (left&nbsp;→&nbsp;right). The model doodles a probabilistic continuation.
     <a href="game.html" style="color:#cf222e; text-decoration:none;">🎮 Beat the model →</a> ·
+    <a href="live.html" style="color:#cf222e; text-decoration:none;">📡 Live audit →</a> ·
     <a href="about.html" style="color:#cf222e; text-decoration:none;">What is this? →</a></p>
 
   <div class="card">
@@ -63,7 +64,7 @@
       <span id="status" style="color:var(--muted); font-size:.85rem;"></span>
     </div>
     <div class="presets">
-      <span>or stamp a “classic” pattern:</span>
+      <span>or stamp a “classic” pattern setup:</span>
       <button data-preset="hs">Head &amp; shoulders</button>
       <button data-preset="dt">Double top</button>
       <button data-preset="flag">Bull flag</button>
@@ -76,6 +77,7 @@
       <span><span class="swatch" style="background:rgba(207,34,46,.45)"></span>median (dashed)</span>
       <span><span class="swatch" style="background:rgba(207,34,46,.18)"></span>uncertainty band</span>
       <span><span class="swatch" style="background:rgba(207,34,46,.14)"></span>earlier rolls</span>
+      <span><span class="swatch" style="background:#999"></span>textbook continuation (dotted)</span>
     </div>
   </div>
 
@@ -85,7 +87,8 @@
     decisions based on this. Provided as-is, without warranty or liability. Time-scale invariant:
     draw at any resolution (intraday, daily, weekly) and any price scale.
     The model runs <strong>entirely in your browser</strong> via ONNX Runtime — nothing you draw
-    leaves the page.
+    leaves the page. (The <a href="live.html" style="color:inherit;">live-audit page</a> fetches
+    market quotes through a small proxy; your drawings still never leave the browser.)
     <a class="hire" href="https://zang-labs.vercel.app" target="_blank" rel="noopener">Hire me</a>
   </footer>
 </div>
@@ -108,6 +111,7 @@ let drawing = false;
 let points = [];          // {x, y} in canvas pixels, as the user draws
 let result = null;        // last forecast response
 let ghosts = [];          // sample paths from earlier rolls (price space)
+let textbook = null;      // preset's folklore continuation, natural pixel coords
 let view = null;          // pixel transform captured at request time
 let modelReady = false;
 
@@ -136,7 +140,7 @@ function pos(e) {
   return { x: t.clientX - r.left, y: t.clientY - r.top };
 }
 
-function start(e) { drawing = true; points = []; result = null; ghosts = []; rerollBtn.disabled = true; addPoint(e); e.preventDefault(); }
+function start(e) { drawing = true; points = []; result = null; ghosts = []; textbook = null; rerollBtn.disabled = true; addPoint(e); e.preventDefault(); }
 function move(e)  { if (drawing) { addPoint(e); e.preventDefault(); } }
 function end()    { drawing = false; completeBtn.disabled = !modelReady || points.length < 5; }
 
@@ -156,7 +160,7 @@ canvas.addEventListener("touchstart", start);
 canvas.addEventListener("touchmove", move);
 canvas.addEventListener("touchend", end);
 
-clearBtn.onclick = () => { points = []; result = null; ghosts = []; completeBtn.disabled = true; rerollBtn.disabled = true; statusEl.textContent = modelReady ? "model ready — draw!" : statusEl.textContent; redraw(); };
+clearBtn.onclick = () => { points = []; result = null; ghosts = []; textbook = null; completeBtn.disabled = true; rerollBtn.disabled = true; statusEl.textContent = modelReady ? "model ready — draw!" : statusEl.textContent; redraw(); };
 horizon.oninput = () => { hval.textContent = horizon.value; };
 
 rerollBtn.onclick = () => {
@@ -168,26 +172,34 @@ rerollBtn.onclick = () => {
 };
 
 // ------------------------- classic-pattern presets -------------------------
-// Shapes as (t, v) control points, t across the draw region, v in 0..1 (1 = high).
-// Stamped with a little jitter so they read as hand-drawn, not clip-art.
+// Each preset stamps only the SETUP of the pattern — the part a chartist would
+// recognize while it is still forming (head-and-shoulders up to the right
+// shoulder, cup without the handle breakout, …). `textbook` is what
+// chart-reading folklore says happens next; it is rendered as a dotted gray
+// reference line in the forecast region so the model's fan can be compared
+// directly against the folklore prediction. Control points are (t, v): t across
+// the region, v in 0..1 (1 = high); textbook v may exceed 0..1 for measured moves.
 const PRESET_SHAPES = {
-  hs:   [[0,.30],[.08,.42],[.16,.38],[.26,.62],[.34,.44],[.42,.46],[.55,.90],[.66,.46],[.72,.44],[.82,.64],[.90,.40],[1,.30]],
-  dt:   [[0,.25],[.15,.45],[.30,.80],[.42,.55],[.55,.58],[.68,.82],[.80,.55],[.90,.42],[1,.35]],
-  flag: [[0,.15],[.12,.28],[.25,.42],[.38,.72],[.44,.68],[.50,.74],[.56,.66],[.62,.71],[.68,.63],[.76,.68],[.84,.60],[1,.62]],
-  cup:  [[0,.72],[.10,.62],[.22,.45],[.35,.35],[.48,.34],[.60,.42],[.70,.58],[.78,.70],[.84,.62],[.90,.58],[1,.66]],
+  hs: {   // right shoulder rolled over, sitting on the neckline (~.45)
+    setup:    [[0,.30],[.08,.42],[.16,.38],[.26,.62],[.34,.44],[.42,.46],[.55,.90],[.66,.46],[.74,.44],[.86,.64],[1,.48]],
+    textbook: [[0,.48],[.14,.43],[.26,.47],[.48,.30],[.72,.18],[1,.08]],  // neckline break, throwback, measured move down
+  },
+  dt: {   // second top rejected, falling toward the neckline (~.56)
+    setup:    [[0,.25],[.15,.45],[.30,.80],[.42,.55],[.55,.58],[.68,.82],[.85,.64],[1,.58]],
+    textbook: [[0,.58],[.16,.52],[.30,.56],[.55,.42],[.78,.33],[1,.28]],  // break + retest, target ≈ top-to-neckline depth
+  },
+  flag: { // pole + drifting flag channel, no breakout yet
+    setup:    [[0,.15],[.12,.28],[.25,.42],[.38,.72],[.44,.68],[.50,.74],[.56,.66],[.62,.71],[.68,.63],[.76,.68],[.84,.60],[1,.64]],
+    textbook: [[0,.64],[.12,.68],[.30,.78],[.55,.90],[.80,.99],[1,1.06]], // breakout continues ≈ the pole height
+  },
+  cup: {  // cup formed, handle still drifting down — breakout not stamped
+    setup:    [[0,.72],[.10,.62],[.22,.45],[.35,.35],[.48,.34],[.60,.42],[.70,.58],[.78,.70],[.86,.62],[1,.58]],
+    textbook: [[0,.58],[.14,.66],[.28,.73],[.52,.85],[.76,.97],[1,1.05]], // rim breakout, target ≈ cup depth
+  },
 };
 
-function presetValues(key, n) {
-  if (key === "walk") {                       // an honest random walk, rescaled to 0..1
-    const v = [0];
-    for (let i = 1; i < n; i++) {
-      const u1 = Math.random() || 1e-12, u2 = Math.random();
-      v.push(v[i - 1] + Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2));
-    }
-    const lo = Math.min(...v), hi = Math.max(...v);
-    return v.map(x => (x - lo) / (hi - lo || 1));
-  }
-  const shape = PRESET_SHAPES[key];
+// Piecewise-linear sample of (t, v) control points at n evenly spaced t's.
+function sampleShape(shape, n) {
   const out = [];
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);
@@ -200,14 +212,41 @@ function presetValues(key, n) {
   return out;
 }
 
+function presetValues(key, n) {
+  if (key === "walk") {                       // an honest random walk, rescaled to 0..1
+    const v = [0];
+    for (let i = 1; i < n; i++) {
+      const u1 = Math.random() || 1e-12, u2 = Math.random();
+      v.push(v[i - 1] + Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2));
+    }
+    const lo = Math.min(...v), hi = Math.max(...v);
+    return v.map(x => (x - lo) / (hi - lo || 1));
+  }
+  return sampleShape(PRESET_SHAPES[key].setup, n);
+}
+
 function stampPreset(key) {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   const x0 = 24, x1 = W * DRAW_LIMIT - 8, n = 64;
   const vals = presetValues(key, n);
+  const vy = v => H * 0.78 - v * H * 0.56;
   points = vals.map((v, i) => ({
     x: x0 + (x1 - x0) * i / (n - 1),
-    y: H * 0.78 - v * H * 0.56 + (Math.random() - 0.5) * H * 0.012,
+    y: vy(v) + (Math.random() - 0.5) * H * 0.012,
   }));
+  // Folklore continuation: from the end of the setup out to the right edge, on
+  // the same value scale. No jitter — it's a reference line, not a drawing.
+  // Spans [x1, W-16], the same span scene() uses for the forecast, so the two
+  // are directly comparable bar-for-bar.
+  const tb = PRESET_SHAPES[key] && PRESET_SHAPES[key].textbook;
+  if (tb) {
+    const m = 24, xr = W - 16;
+    const tv = sampleShape(tb, m);
+    textbook = tv.map((v, i) => ({ x: x1 + (xr - x1) * i / (m - 1), y: vy(v) }));
+    textbook[0] = { x: x1, y: points[points.length - 1].y };  // join the stamp exactly
+  } else {
+    textbook = null;    // a random walk has no folklore prediction
+  }
   result = null; ghosts = [];
   completeBtn.disabled = !modelReady;
   rerollBtn.disabled = true;
@@ -259,6 +298,7 @@ function computeTransform() {
   const s = scene();
   const xs = [], ys = [];
   for (const p of points) { xs.push(p.x); ys.push(p.y); }
+  if (textbook) for (const p of textbook) { xs.push(p.x); ys.push(p.y); }
   for (let i = 0; i <= s.horizon; i++) {
     xs.push(s.Xn(i));
     ys.push(s.Yp(s.sampleLine[i]));
@@ -297,8 +337,25 @@ function redraw() {
     return;
   }
   const T = computeTransform();
+  drawTextbook(T);                     // folklore reference, under everything
   drawDoodle(T);                       // your line — shape always preserved
   if (result) drawForecast(T);
+}
+
+// The preset's textbook continuation: what chart folklore says comes next.
+function drawTextbook(T) {
+  if (!textbook || textbook.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = "#999"; ctx.lineWidth = 1.8; ctx.lineJoin = "round";
+  ctx.setLineDash([2, 5]);
+  ctx.beginPath();
+  textbook.forEach((p, i) => { const [x, y] = T(p.x, p.y); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#999"; ctx.font = "11px system-ui"; ctx.textAlign = "end";
+  const [lx, ly] = T(textbook[textbook.length - 1].x, textbook[textbook.length - 1].y);
+  ctx.fillText("textbook", lx, ly - 6);
+  ctx.restore();
 }
 
 function drawForecast(T) {

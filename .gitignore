@@ -27,7 +27,8 @@ lightning_logs/
 # OS / editor
 .DS_Store
 .idea/
-.vscode/
 
 # Scratch / experiment logs
 scratch_*
+config.bat
+node_modules
