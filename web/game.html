@@ -51,7 +51,8 @@
   <h1>Beat the Model 🎯</h1>
   <p class="sub">A real chart from history, ticker hidden. Draw what happens next — then see the truth,
     and whether you out-forecast the neural net.
-    <a href="./">← back to the drawing board</a> · <a href="about.html">what is this?</a></p>
+    <a href="./">← back to the drawing board</a> · <a href="live.html">📡 live audit</a> ·
+    <a href="about.html">what is this?</a></p>
 
   <div class="card">
     <canvas id="board"></canvas>
@@ -143,11 +144,16 @@ function mapping() {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   const nBars = CTX_N + HOR;                    // bar index 0..nBars
   const X = i => PAD + (W - 2 * PAD) * (i / nBars);
-  // y-domain: context always; truth/fan/guess once revealed or drawn
+  // y-domain: context always; truth/median/guess once revealed or drawn.
+  // The fan's outer quantiles are deliberately NOT in the domain: on volatile
+  // (esp. monthly) windows the calibrated band is enormous and would squash
+  // history, guess, and truth into a sliver at the bottom. Fit the lines that
+  // matter and let the band clip off-canvas (same fix as index.html's
+  // computeTransform, which excludes bands from its fit box).
   const vals = ch.prices.slice(0, CTX_N + 1).slice();
   if (truthShown) {
     vals.push(...ch.prices.slice(CTX_N + 1));
-    if (fanQ) { vals.push(...fanQ["0.10"], ...fanQ["0.90"]); }
+    if (fanQ) vals.push(...fanQ["0.50"]);
   }
   if (guess) vals.push(...guess);
   let lo = Math.min(...vals), hi = Math.max(...vals);
@@ -239,16 +245,17 @@ function polyline(vals, i0, stroke, width, dash) {
 }
 
 function redraw() {
-  const m = mapping();
-  ctx.clearRect(0, 0, m.W, m.H);
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  ctx.clearRect(0, 0, W, H);
 
-  // gridlines + the "now" boundary
+  // gridlines + the "now" boundary (mapping() needs ch, so guard first)
   ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
   for (let i = 1; i < 6; i++) {
-    const y = m.H * i / 6;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(m.W, y); ctx.stroke();
+    const y = H * i / 6;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
   if (!ch) return;
+  const m = mapping();
   const bx = m.X(CTX_N);
   ctx.save();
   ctx.strokeStyle = "#c9c9c9"; ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5;

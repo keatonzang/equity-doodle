@@ -41,7 +41,7 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="nav"><a href="./">← back to the drawing board</a> · <a href="game.html">🎯 beat the model</a></div>
+  <div class="nav"><a href="./">← back to the drawing board</a> · <a href="game.html">🎯 beat the model</a> · <a href="live.html">📡 live audit</a></div>
 
   <h1>About Equity Doodle ✏️📈</h1>
   <p class="sub">Draw the start of a chart — let the model doodle the rest.</p>
@@ -79,9 +79,10 @@
     <h2>It runs entirely in your browser</h2>
     <p>
       The trained network is exported to <strong>ONNX</strong> (~1&nbsp;MB) and executed locally with
-      <a href="https://onnxruntime.ai/">ONNX Runtime Web</a>. There is no server and no API:
-      nothing you draw ever leaves the page, forecasts cost nothing to serve, and the whole
-      app is a static site.
+      <a href="https://onnxruntime.ai/">ONNX Runtime Web</a>. Inference never touches a server:
+      nothing you draw ever leaves the page and forecasts cost nothing to serve. (The one
+      exception to "no API" is the <a href="live.html">live-audit page</a>, which fetches market
+      quotes through a tiny proxy — your drawings still stay in the browser.)
     </p>
 
     <h2>What the median and the bands are really telling you</h2>
