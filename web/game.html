@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="Beat the model: a real historical chart, hidden ticker. Draw what happens next, then see the truth — and whether you out-forecast a neural net." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Beat the Model — Equity Doodle 🎯" />
+<meta property="og:title" content="Beat the Model — Equity Doodle" />
 <meta property="og:description" content="A real historical chart, hidden ticker. Draw what happens next, then see the truth — and whether you out-forecast a neural net." />
 <meta property="og:url" content="https://equity-doodle.vercel.app/game" />
 <meta property="og:image" content="https://equity-doodle.vercel.app/og.png" />
 <meta name="twitter:card" content="summary_large_image" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎯</text></svg>" />
-<title>Beat the Model 🎯 — Equity Doodle</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><polyline points=%2212,78 36,44 56,60 88,22%22 fill=%22none%22 stroke=%22%23cf222e%22 stroke-width=%2214%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>" />
+<title>Beat the Model — Equity Doodle</title>
 <style>
   :root { --ink:#222; --accent:#cf222e; --guess:#1a7f37; --truth:#0969da; --grid:#eee; --muted:#666; }
   * { box-sizing: border-box; }
@@ -48,10 +48,10 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Beat the Model 🎯</h1>
+  <h1>Beat the Model</h1>
   <p class="sub">A real chart from history, ticker hidden. Draw what happens next — then see the truth,
     and whether you out-forecast the neural net.
-    <a href="./">← back to the drawing board</a> · <a href="live.html">📡 live audit</a> ·
+    <a href="./">← back to the drawing board</a> · <a href="live.html">live audit</a> ·
     <a href="about.html">what is this?</a></p>
 
   <div class="card">
@@ -143,7 +143,7 @@ nextBtn.onclick = newChart;
 function mapping() {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   const nBars = CTX_N + HOR;                    // bar index 0..nBars
-  const X = i => PAD + (W - 2 * PAD) * (i / nBars);
+  const X = i => W * (i / nBars);               // flush to both edges: the forecast must reach the right border
   // y-domain: context always; truth/median/guess once revealed or drawn.
   // The fan's outer quantiles are deliberately NOT in the domain: on volatile
   // (esp. monthly) windows the calibrated band is enormous and would squash
@@ -232,6 +232,56 @@ canvas.addEventListener("touchstart", start);
 canvas.addEventListener("touchmove", move);
 canvas.addEventListener("touchend", end);
 
+const fmtPrice = v =>
+  v >= 1000 ? v.toLocaleString(undefined, { maximumFractionDigits: 0 })
+  : v >= 10 ? v.toFixed(2)
+  : v >= 0.1 ? v.toFixed(3)
+  : v.toPrecision(3);
+const fmtPctAxis = x => (x > 0 ? "+" : "") + x.toFixed(Math.abs(x) < 3 ? 1 : 0) + "%";
+
+// Axis annotations. Before the reveal both the asset and the bar interval are
+// secrets, so the y-axis shows % change vs the last visible price and the
+// x-axis counts bars; the reveal switches the y-axis to real prices and adds
+// the model's predicted price levels at the end of the horizon.
+function drawAxes(m) {
+  ctx.save();
+  ctx.font = "11px system-ui";
+
+  const p0 = ch.prices[CTX_N];
+  ctx.fillStyle = "#999"; ctx.textAlign = "start"; ctx.textBaseline = "bottom";
+  for (let i = 1; i < 6; i++) {
+    const y = m.H * i / 6;
+    const v = m.Yinv(y);
+    ctx.fillText(truthShown ? fmtPrice(v) : fmtPctAxis((v / p0 - 1) * 100), 4, y - 2);
+  }
+
+  ctx.textBaseline = "alphabetic";
+  const ticks = [];
+  for (let k = 20; k < CTX_N; k += 20) ticks.push([CTX_N - k, "-" + k]);
+  ticks.push([CTX_N, "now"]);
+  for (let k = 10; k <= HOR; k += 10) ticks.push([CTX_N + k, "+" + k]);
+  ticks.sort((a, b) => a[0] - b[0]);
+  ticks[0][1] += " bars";
+  for (const [i, label] of ticks) {
+    const x = m.X(i);
+    ctx.fillStyle = "#999"; ctx.textAlign = x > m.W - 30 ? "end" : "center";
+    ctx.fillText(label, x, m.H - 6);
+  }
+
+  if (truthShown && fanQ) {
+    const put = (arr, color) => {
+      const y = m.Y(arr[HOR]);
+      if (y < 12 || y > m.H - 16) return;      // clipped along with the band
+      ctx.fillStyle = color; ctx.textAlign = "end"; ctx.textBaseline = "middle";
+      ctx.fillText(fmtPrice(arr[HOR]), m.W - 4, y);
+    };
+    put(fanQ["0.10"], "rgba(207,34,46,.55)");
+    put(fanQ["0.90"], "rgba(207,34,46,.55)");
+    put(fanQ["0.50"], "#cf222e");
+  }
+  ctx.restore();
+}
+
 function polyline(vals, i0, stroke, width, dash) {
   const m = mapping();
   ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.lineJoin = "round";
@@ -295,8 +345,10 @@ function redraw() {
     ctx.stroke();
   } else if (!truthShown) {
     ctx.fillStyle = "#bbb"; ctx.font = "16px system-ui";
-    ctx.fillText("✏️  continue the line from the dashed boundary…", bx + 12, m.H / 2);
+    ctx.fillText("continue the line from the dashed boundary…", bx + 12, m.H / 2);
   }
+
+  drawAxes(m);
 }
 
 /* --------------------------------- reveal ------------------------------- */
@@ -331,7 +383,7 @@ revealBtn.onclick = async () => {
     }
     const youWin = youMiss < modelMiss;
     verdictEl.innerHTML = `
-      <div class="headline">${youWin ? "🏆 You beat the model’s median!" : "🤖 The model’s median edged you out."}</div>
+      <div class="headline">${youWin ? "You beat the model’s median!" : "The model’s median edged you out."}</div>
       That was <strong>${ch.symbol}</strong>, ${ch.scale} bars,
       ${ch.dates[0]} → ${ch.dates[1]}, with the answer running to ${ch.dates[2]}.
       <table>
